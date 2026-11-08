@@ -231,9 +231,12 @@ class Core:
     # ----------------------------------------------------------------- политика
     async def guard(self, action, company_id: int, *, actor: str = "user", approved: frozenset[str] = frozenset(),
                     self_approve: bool = False, safety: bool = False,
-                    limit: Money | None = None) -> CompanySnapshot:
-        """Снимок → `check_action`. Отказ — `PolicyDenied`, нужна кнопка — `ApprovalRequired`."""
-        snapshot = await self.snapshot(company_id, limit=limit)
+                    limit: Money | None = None, retiring: frozenset[str] = frozenset()) -> CompanySnapshot:
+        """Снимок → `check_action`. Отказ — `PolicyDenied`, нужна кнопка — `ApprovalRequired`.
+
+        `retiring` — кампании, которые первый шаг саги поставит на паузу: в производном снимке они неактивны.
+        """
+        snapshot = self.with_retired(await self.snapshot(company_id, limit=limit), retiring)
         keys = approved | (frozenset({self._policy.action_key(action, snapshot)}) if self_approve else frozenset())
         decision = self._policy.check_action(action, snapshot, approved_keys=keys)
         label = type(action).__name__
@@ -246,6 +249,14 @@ class Core:
         if isinstance(decision, NeedsApproval):
             raise ApprovalRequired(decision)
         return snapshot
+
+    @staticmethod
+    def with_retired(snapshot: CompanySnapshot, retiring: frozenset[str]) -> CompanySnapshot:
+        """Производный снимок: перечисленные кампании неактивны. Реальное состояние не меняется."""
+        if not retiring:
+            return snapshot
+        campaigns = tuple(replace(c, active=False) if c.id in retiring else c for c in snapshot.campaigns)
+        return replace(snapshot, campaigns=campaigns)
 
     def peek_keys(self, approval_id: str | None, company_id: int | None, kinds: tuple[str, ...] = ()) -> frozenset[str]:
         """Ключи действий из ещё не потреблённого подтверждения (без потребления)."""

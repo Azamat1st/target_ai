@@ -3,7 +3,7 @@ from datetime import timedelta
 
 import pytest
 
-from .conftest import CHAT
+from .conftest import ACCOUNTS, CHAT
 from .test_planning import campaigns, ready, script
 
 
@@ -26,6 +26,15 @@ async def test_new_plan_over_running_campaign_is_not_blocked_by_its_budgets(env)
     total = sum(g["daily_budget"]["amount_minor"] for g in plan.data["groups"])
     assert plan.data["groups"] and 0 < total <= snapshot.daily_cap.amount_minor, env.last()
     assert "не покрывает минимум Meta" not in env.last()
+
+    assert (await intake.handle_callback(CHAT, env.callback("Запустить"))) is True  # запуск не отклонён потолком
+
+    assert "выше потолка" not in env.all_text()
+    active = [c for c in campaigns(env) if c["status"] == "ACTIVE"]
+    assert len(active) == 1 and len(campaigns(env)) == 2
+    spending = [g for g in env.fake.objects("adset", ACCOUNTS["EUR"])
+                if g["status"] == "ACTIVE" and g["campaign_id"] == active[0]["id"]]
+    assert sum(g["daily_budget"] for g in spending) <= snapshot.daily_cap.amount_minor
 
 
 @pytest.mark.parametrize("phrase", ["составь новый медиаплан", "новый план", "сделай новый медиаплан",

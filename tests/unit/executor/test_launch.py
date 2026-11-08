@@ -175,3 +175,131 @@ async def test_lost_response_on_create_is_resolved_by_tag_without_duplicate(env)
     result = await env.launch(env.executor(), plan)
 
     assert result.status == LAUNCHED and len(env.live("campaign")) == 1
+
+
+# ---------------------------------------------------------------- новый план поверх работающей кампании
+def _active_budgets(env):
+    groups = {g["id"]: g for g in env.live("adset")}
+    return sum(g["daily_budget"] for g in groups.values()
+               if g["status"] == "ACTIVE" and env.fake.object(g["campaign_id"])["status"] == "ACTIVE")
+
+
+@pytest.mark.parametrize("mode", ["confirm", "autonomous"])
+async def test_new_plan_over_running_campaign_launches_with_one_active_campaign(env, mode):
+    company = env.company(mode=mode)
+    ex = env.executor()
+    first = await env.launch(ex, env.plan(company, budget=2000))  # 2 x 2000: тратит почти весь дневной потолок
+    plan = env.plan(company, version=2, budget=2000)
+    snapshot = await ex.snapshot(company.id)
+
+    second = await env.launch(ex, plan)  # без снятия старой сумма 8000 была бы выше потолка
+
+    assert second.status == LAUNCHED
+    assert env.fake.object(first.campaign_id)["status"] == "PAUSED"
+    assert [c["id"] for c in env.live("campaign") if c["status"] == "ACTIVE"] == [second.campaign_id]
+    assert _active_budgets(env) == 4000 <= snapshot.daily_cap.amount_minor
+
+
+async def test_plan_above_cap_on_its_own_is_still_denied_over_running_campaign(env):
+    company = env.company(mode="autonomous")
+    ex = env.executor()
+    first = await env.launch(ex, env.plan(company, budget=1000))
+    huge = env.plan(company, version=2, budget=50000)
+
+    with pytest.raises(PolicyDenied):
+        await ex.check_launch(huge.id)
+    with pytest.raises(PolicyDenied):
+        await ex.launch(huge.id, None)
+
+    assert env.fake.object(first.campaign_id)["status"] == "ACTIVE" and len(env.live("campaign")) == 1
+
+
+async def test_failed_pause_of_previous_campaign_stops_saga_before_creating_anything(env):
+    from target_ai.fakemeta import errors
+    company = env.company(mode="autonomous")
+    ex = env.executor()
+    first = await env.launch(ex, env.plan(company, budget=1000))
+    before = _active_budgets(env)
+    env.fake.inject_error(rf"POST {first.campaign_id}$", errors.server_error(), times=20)
+    mutations_before = len(env.mutations())
+    plan = env.plan(company, version=2, budget=1000)
+
+    result = await env.launch(ex, plan)
+
+    assert result.status == AWAITING_DECISION and result.failed_step == "retire_previous"
+    assert len(env.live("campaign")) == 1 and env.fake.object(first.campaign_id)["status"] == "ACTIVE"
+    assert _active_budgets(env) == before and not env.db.objects.list(launch_id=result.launch_id)
+    assert [r for r in env.mutations()[mutations_before:] if r.path.startswith("act_")] == []
+
+
+async def test_activate_refuses_while_previous_campaign_is_still_active_in_registry(env):
+    company = env.company(mode="autonomous")
+    ex = env.executor()
+    first = await env.launch(ex, env.plan(company, budget=1000))
+    original = ex._retire_previous
+
+    async def retire_but_leave_active(run):
+        await original(run)
+        await ex.io(ex.set_registry, first.campaign_id, status="ACTIVE")  # реестр говорит: старая снова тратит
+
+    ex._retire_previous = retire_but_leave_active
+    result = await env.launch(ex, env.plan(company, version=2, budget=1000))
+
+    assert result.status == AWAITING_DECISION and result.failed_step == "activate"
+    assert all(c["status"] == "PAUSED" for c in env.live("campaign") if c["id"] != first.campaign_id)
+
+
+# ---------------------------------------------------------------- старая кампания включена вручную
+def _turn_on_manually(env, campaign_id):
+    env.fake.state.obj(campaign_id)["status"] = "ACTIVE"  # Ads Manager; реестр об этом не знает
+    env.fake.state.save()
+
+
+@pytest.mark.parametrize("mode", ["confirm", "autonomous"])
+async def test_previous_campaign_switched_on_by_hand_is_paused_before_new_one_activates(env, mode):
+    company = env.company(mode=mode)
+    ex = env.executor()
+    first = await env.launch(ex, env.plan(company, budget=2000))
+    await ex.pause_company(company.id)
+    _turn_on_manually(env, first.campaign_id)
+    assert env.db.objects.get_by_meta_id(first.campaign_id).status != "ACTIVE"
+
+    second = await env.launch(ex, env.plan(company, version=2, budget=2000))
+
+    assert second.status == LAUNCHED
+    assert [c["id"] for c in env.live("campaign") if c["status"] == "ACTIVE"] == [second.campaign_id]
+    assert _active_budgets(env) == 4000
+
+
+async def test_approval_issued_while_old_ran_then_old_switched_on_by_hand_does_not_double_spend(env):
+    company = env.company(mode="confirm")
+    ex = env.executor()
+    first = await env.launch(ex, env.plan(company, budget=2000))
+    plan = env.plan(company, version=2, budget=2000)
+    check = await ex.check_launch(plan.id)
+    approval = ex.create_approval(check.needs_approval, company_id=company.id).id
+    await ex.pause_company(company.id)
+    _turn_on_manually(env, first.campaign_id)
+
+    result = await ex.launch(plan.id, approval)
+
+    assert result.status == LAUNCHED
+    assert [c["id"] for c in env.live("campaign") if c["status"] == "ACTIVE"] == [result.campaign_id]
+    assert _active_budgets(env) == 4000
+
+
+async def test_activate_refuses_when_meta_shows_previous_campaign_active_despite_paused_registry(env):
+    company = env.company(mode="autonomous")
+    ex = env.executor()
+    first = await env.launch(ex, env.plan(company, budget=1000))
+    original = ex._retire_previous
+
+    async def retire_then_switch_on_by_hand(run):
+        await original(run)
+        _turn_on_manually(env, first.campaign_id)
+
+    ex._retire_previous = retire_then_switch_on_by_hand
+    result = await env.launch(ex, env.plan(company, version=2, budget=1000))
+
+    assert result.status == AWAITING_DECISION and result.failed_step == "activate"
+    assert [c["id"] for c in env.live("campaign") if c["status"] == "ACTIVE"] == [first.campaign_id]

@@ -87,7 +87,7 @@ class Saga(Core):
         self._require_complete(spec)
         action = await self._launch_action(plan, spec)
         try:
-            await self.guard(action, plan.company_id)
+            await self.guard(action, plan.company_id, retiring=await self._retiring(plan.company_id))
         except ApprovalRequired as need:
             return LaunchResult(NEEDS_APPROVAL, need.needs.summary_ru, plan_id, needs_approval=need.needs)
         return LaunchResult("ready", "Запуск разрешён политикой.", plan_id)
@@ -105,7 +105,8 @@ class Saga(Core):
         action = await self._launch_action(plan, spec)
         keys = await self.io(self.peek_keys, approval_id, plan.company_id, ("launch",))
         try:
-            await self.guard(action, plan.company_id, actor=actor, approved=keys)
+            await self.guard(action, plan.company_id, actor=actor, approved=keys,
+                             retiring=await self._retiring(plan.company_id))
         except ApprovalRequired as need:
             return LaunchResult(NEEDS_APPROVAL, need.needs.summary_ru, plan_id, needs_approval=need.needs)
         async with self.company_lock(plan.company_id):
@@ -124,7 +125,8 @@ class Saga(Core):
                        keys: frozenset[str]) -> LaunchResult | None:
         """§4 шаг 2: лимиты на текущих данных уже после потребления подтверждения; не прошло — ничего не создаём."""
         try:
-            await self.guard(await self._launch_action(plan, spec), plan.company_id, actor=actor, approved=keys)
+            await self.guard(await self._launch_action(plan, spec), plan.company_id, actor=actor, approved=keys,
+                             retiring=await self._retiring(plan.company_id))
             return None
         except PolicyDenied as exc:
             reason = exc.reason_ru
@@ -222,6 +224,11 @@ class Saga(Core):
             cap = snapshot.min_spend_cap  # меньше минимума Meta не позволяет: политика потребует кнопку
         return Launch(groups=self.launch_groups(spec), spend_cap=cap, tag=f"P{plan.id}")
 
+    async def _retiring(self, company_id: int) -> frozenset[str]:
+        """Кампании, которые `retire_previous` снимет первым шагом: для проверки запуска они уже неактивны."""
+        return await self.io(lambda: frozenset(
+            o.meta_id for o in self._previous_campaigns(company_id, None)))
+
     @staticmethod
     def _already(launch: LaunchRow) -> LaunchResult:
         return LaunchResult(ALREADY_DONE, "Этот запуск уже выполнен или идёт — повторно не создаю.",
@@ -244,7 +251,7 @@ class Saga(Core):
 
     async def _execute(self, run: Run) -> None:
         try:
-            await self._retire_previous(run)
+            await self._retire_guarded(run)
             if not await self._step_campaign(run):
                 return
             await self._step_audiences(run)
@@ -424,20 +431,50 @@ class Saga(Core):
                     return found
         raise StepFailed(step, "Не удалось создать объект.")
 
+    async def _retire_guarded(self, run: Run) -> None:
+        """Не удалось снять старую кампанию (ошибка или неизвестный исход) — ничего нового не создаём."""
+        try:
+            await self._retire_previous(run)
+        except MetaError as exc:
+            raise StepFailed("retire_previous", "Не удалось поставить на паузу предыдущую кампанию: "
+                             f"{exc.user_message_ru} Новое не создавалось, чтобы не тратить две кампании сразу.",
+                             exc.fbtrace_id) from exc
+
+    def _previous_campaigns(self, company_id: int, current_launch: int | None) -> list:
+        """Все прежние свои кампании компании (любой статус в реестре, кроме удалённых и архивных)."""
+        return [o for o in self._db.objects.list(company_id=company_id, kind="campaign")
+                if o.launch_id != current_launch and o.status not in DEAD_STATUSES]
+
+    async def _require_previous_paused(self, run: Run) -> None:
+        """Перед включением новой: каждая прежняя кампания по реестру И по факту в Meta не тратит."""
+        previous = await self.io(self._previous_campaigns, run.company.id, run.launch.id)
+        spending = [c.meta_id for c in previous if c.status == "ACTIVE"]
+        for campaign in previous:
+            try:
+                state = await self.gateway().get_ad_status(campaign.meta_id)
+            except MetaError as exc:
+                raise StepFailed("activate", "Не удалось проверить, что предыдущая кампания на паузе "
+                                 f"({campaign.meta_id}): {exc.user_message_ru} Новую не включаю.",
+                                 exc.fbtrace_id) from exc
+            if "ACTIVE" in (state.get("status"), state.get("effective_status")) and campaign.meta_id not in spending:
+                spending.append(campaign.meta_id)
+        if spending:
+            raise StepFailed("activate", f"Предыдущая кампания ({', '.join(spending)}) не на паузе: новую не включаю, "
+                             "чтобы не тратить две кампании сразу. Всё новое остаётся на паузе.")
+
     async def _retire_previous(self, run: Run) -> None:
         row = await self.io(self._row, run.launch.id, "retire_previous")
         if row.status == "done" or not run.create:
             return
-        prev = await self.io(lambda: [o for o in self._db.objects.list(company_id=run.company.id, kind="campaign")
-                                      if o.launch_id != run.launch.id and o.status in ("ACTIVE", "PAUSED")])
+        prev = await self.io(self._previous_campaigns, run.company.id, run.launch.id)
         retired = []
         for campaign in prev:
             retired.append(campaign.meta_id)
-            if campaign.status == "ACTIVE":
-                await self.guard(Pause(campaign.meta_id), run.company.id, actor=run.actor)
-                await self.mutate(run.actor, run.company.id, "retire:pause", {"campaign": campaign.meta_id},
-                                  lambda c=campaign: self.gateway().set_status(c.meta_id, "PAUSED"))
-                await self.io(self.set_registry, campaign.meta_id, status="PAUSED")
+            # пауза в Meta ставится всем прежним: в реестре «на паузе» могло устареть (включили вручную)
+            await self.guard(Pause(campaign.meta_id), run.company.id, actor=run.actor)
+            await self.mutate(run.actor, run.company.id, "retire:pause", {"campaign": campaign.meta_id},
+                              lambda c=campaign: self.gateway().set_status(c.meta_id, "PAUSED"))
+            await self.io(self.set_registry, campaign.meta_id, status="PAUSED")
             await self._lower_cap(run, campaign.meta_id)
             await self.io(self.set_registry, campaign.meta_id, status=RETIRED)  # снятая никогда не включается
         await self.io(self._save_row, row, status="done", data={"retired": retired})
@@ -599,6 +636,7 @@ class Saga(Core):
         row = await self.io(self._row, run.launch.id, "activate")
         if row.status == "done":
             return
+        await self._require_previous_paused(run)
         order = [("ad", run.ids[k]) for k in sorted(run.ids) if k.startswith("ad:")]
         order += [("group", run.ids[k]) for k in sorted(run.ids) if k.startswith("adset:")]
         order.append(("campaign", run.ids["campaign"]))
