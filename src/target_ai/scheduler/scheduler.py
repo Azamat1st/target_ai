@@ -51,6 +51,15 @@ class Scheduler:
             advance(moment - self._clock.now())
         return await self.tick()
 
+    def rebase(self, now: datetime) -> int:
+        """Часы сменились (демо ↔ настоящие): задачи с интервалом идут на «сейчас», суточные - на ближайший срок
+        по новым часам. Вызывать только при смене часов, не при любой смене уровня."""
+        jobs = self._db.jobs.list()
+        for job in jobs:
+            due = now if job.kind in sch.INTERVALS else self._next(job.kind, job.company_id)
+            self._db.jobs.update(replace(job, due_at=due))
+        return len(jobs)
+
     def ensure_jobs(self) -> None:
         """Создаёт недостающие задачи: по каждой активной компании и глобальные."""
         now, jobs = self._clock.now(), self._db.jobs

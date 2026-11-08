@@ -5,6 +5,7 @@ from __future__ import annotations
 from target_ai.policy import NeedsApproval
 
 from .controls import Controls
+from .errors import ExecutorError
 from .engagement import Engagement
 from target_ai.meta.errors import MetaError
 
@@ -31,19 +32,21 @@ class Executor(Controls, Engagement):
                                          payload={"key": needs.key, "summary": needs.summary_ru}, **kwargs)
 
     async def probe_ig_access(self, account_id: str, page_id: str, ig_user_id: str, *,
-                              website: str | None = None) -> None:
+                              website: str | None = None, gateway=None) -> None:
         """Проверочное создание креатива (`validate_only`): есть ли у аккаунта доступ к Instagram.
 
         Креатив ссылается на настоящий пост IG (нет постов - ссылка без картинки). Ничего не создаёт и
         не пишет в реестр; отказ Meta - `MetaError` (подсубкод 1815199 - `kind="ig_access"`).
         Одна строка журнала пишется ПОСЛЕ ответа Meta: `ok` или `error` с кодом.
         """
+        if gateway is not None and not getattr(gateway, "validate_only", False):
+            raise ExecutorError("Проверка доступа к Instagram возможна только проверочным клиентом (validate_only).")
         action, info = "проверка доступа к Instagram", {"account_id": account_id, "page_id": page_id,
                                                          "ig_user_id": ig_user_id}
         try:
-            params = await standin_for(self.gateway(), name="[ПРОВЕРКА] доступ к Instagram", page_id=page_id,
+            params = await standin_for(gateway or self.gateway(), name="[ПРОВЕРКА] доступ к Instagram", page_id=page_id,
                                        ig_user_id=ig_user_id, website=website)
-            await self.gateway(validate_only=True).create_creative(account_id, params)
+            await (gateway or self.gateway(validate_only=True)).create_creative(account_id, params)
         except MetaError as exc:
             await self.audit("system", action, None, "error", message=exc.user_message_ru, meta_code=exc.code,
                              meta_subcode=exc.subcode, meta_kind=exc.kind, fbtrace_id=exc.fbtrace_id, **info)

@@ -231,6 +231,13 @@ class AlertsRepo(_MarkRepo):
 class UpdatesRepo(_MarkRepo):
     table, key_column, time_column = "processed_updates", "update_id", "processed_at"
 
+    def prune(self, keep_last: int) -> int:
+        """Оставляет `keep_last` самых новых update_id; возвращает число удалённых."""
+        cur = self._db._execute(
+            "DELETE FROM processed_updates WHERE update_id <= (SELECT MAX(update_id) FROM processed_updates) - ?",
+            (keep_last,))
+        return cur.rowcount
+
 
 class DialogsRepo:
     def __init__(self, db: Database) -> None:
