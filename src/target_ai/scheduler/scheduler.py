@@ -29,6 +29,13 @@ class JobRun:
         return self.error is None
 
 
+JOB_TITLES = {
+    sch.STATS: "обновление статистики", sch.MODERATION: "проверка объявлений", sch.ALERTS: "проверка тревог",
+    sch.TOKEN: "проверка токена Meta", sch.OPTIMIZE: "ежедневная оптимизация",
+    sch.DAILY_REPORT: "ежедневная сводка", sch.WEEKLY_REPORT: "недельный разбор",
+}
+
+
 class Scheduler:
     """`handlers`: вид задачи → async-функция(company_id). Ошибка одной задачи не останавливает остальные."""
 
@@ -102,7 +109,8 @@ class Scheduler:
         if self._notifier is None:
             return
         where = f" (компания {job.company_id})" if job.company_id else ""
+        title = JOB_TITLES.get(job.kind, "фоновая задача")
         try:
-            await self._notifier.send(None, f"Задача «{job.kind}»{where} не выполнена: {error}", [])
+            await self._notifier.send(None, f"Задача «{title}»{where} не выполнена: {error}", [])
         except Exception:
             log.exception("Не удалось сообщить об ошибке задачи")

@@ -69,7 +69,7 @@ async def main() -> None:
         await act(f"нажимаю «{label}»", lambda: tg.press_button(OWNER, label))
 
     await act(f"«{ADD_TEXT}»", lambda: tg.say(OWNER, ADD_TEXT))
-    for label in ("Демо Германия", "Studio Yoga", "Всё верно", "Пропустить", "Составить медиаплан"):
+    for label in ("Демо Германия", "Studio Yoga", "Instagram, связанный", "Всё верно", "Пропустить", "Составить медиаплан"):
         await press(label)
     for answer in ("Кофейня GmbH", "Кофейня GmbH"):  # ЕС: получатель и плательщик рекламы
         if "🚀 Запустить" not in tg.last(OWNER).labels:

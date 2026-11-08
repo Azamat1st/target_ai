@@ -25,6 +25,9 @@ router = Routes("text")
 async def on_text(message: Message, app) -> None:
     chat_id, text = message.chat.id, message.text or ""
     state = await pending.get_pending(app, chat_id)
+    if state is not None and await app.intake.is_other_request(text):
+        await pending.clear_pending(app, chat_id)  # R18.1: явно другой запрос снимает вопрос
+        state = None
     if state is not None:
         await answer_pending(app, chat_id, state, text)
         return
@@ -58,7 +61,7 @@ async def route_intent(app, chat_id: int, text: str) -> None:
     if kind is IntentKind.HALT:
         await actions.stop_all(app, chat_id)
     elif kind is IntentKind.REPORT:
-        await report_intent(app, chat_id, companies, intent.company)
+        await report_intent(app, chat_id, companies, intent.company, intent.report_period or "day")
     elif kind is IntentKind.SETTING:
         await actions.show_settings(app, chat_id)
     elif kind in (IntentKind.PAUSE, IntentKind.RESUME, IntentKind.SET_LIMIT):
@@ -75,9 +78,9 @@ def match_companies(companies: list[Company], hint: str | None) -> list[Company]
     return [c for c in companies if needle in c.name.casefold() or needle == (c.instagram_handle or "").casefold()]
 
 
-async def report_intent(app, chat_id: int, companies: list[Company], hint: str | None) -> None:
+async def report_intent(app, chat_id: int, companies: list[Company], hint: str | None, period: str = "day") -> None:
     found = match_companies(companies, hint)
-    await actions.show_report(app, chat_id, found[0].id if len(found) == 1 else None)
+    await actions.show_report(app, chat_id, found[0].id if len(found) == 1 else None, period)
 
 
 async def company_intent(app, chat_id: int, companies: list[Company], intent) -> None:

@@ -45,6 +45,8 @@ async def test_missing_pages_manage_ads_names_the_permission(env):
 
     assert report.can_test and not report.can_live
     assert "pages_manage_ads" in texts(report)
+    assert "в тестовый уровень можно" not in report.verdict
+    assert "боевой" in report.verdict and "тестовому они не мешают" in report.verdict
 
 
 async def test_unsettled_account_is_reported_as_payment_problem(env):
@@ -114,3 +116,12 @@ async def test_unreachable_claude_is_a_warning_not_a_blocker(env):
 
     assert report.can_live
     assert "проверить его сейчас не удалось" in texts(report)
+
+
+async def test_token_check_error_blocks_test_level_too_and_verdict_does_not_claim_otherwise(env):
+    env.fake.inject_error(r"GET .*", fe.permission_denied(), times=1)  # ошибка Meta на проверке самого токена
+
+    report = await env.checker().run()
+
+    assert not report.can_test and not report.can_live
+    assert "тестовому они не мешают" not in report.verdict and "мешают и тестовому" in report.verdict

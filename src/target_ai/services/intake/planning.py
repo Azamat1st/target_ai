@@ -11,6 +11,7 @@ from target_ai.agents import (
     CopyInput, CreativeOption, InterestOption, Objective, Passport, PassportFact, Questionnaire, StrategyInput, strategize,
 )
 from target_ai.executor import ExecutorError, PolicyDenied, plan_data_from_validated
+from target_ai.llm import DEMO_MARK
 from target_ai.llm.errors import LLMError
 from target_ai.meta.errors import MetaError
 from target_ai.agents.schemas import NOT_FOUND
@@ -49,7 +50,8 @@ class Planning(PlanInteractions):
         self._db, self._factory, self._llm = db, gateway_factory, llm
         self._clock, self._notifier, self._executor, self._dir = clock, notifier, executor, media_dir
 
-    async def propose(self, company_id: int, chat_id: int, *, edit_request: str | None = None) -> PlanOutcome:
+    async def propose(self, company_id: int, chat_id: int, *, edit_request: str | None = None,
+                      retry: bool = False) -> PlanOutcome:
         company = await self._io(self._db.companies.get, company_id)
         row = await self._io(self._db.passports.latest, company_id) if company else None
         if company is None or row is None:
@@ -58,6 +60,8 @@ class Planning(PlanInteractions):
         objective = Objective(company.profile.get("objective") or passport.recommended_objective)
         if await self._preflight(company, objective, chat_id, edit_request):
             return PlanOutcome("needs_input")
+        chain = await self._io(self._edit_chain, company_id, edit_request, retry)
+        request = "\n".join(chain) or None  # правки накапливаются: версия строится от предыдущей, а не от исходного
         gateway = self._factory(False)
         objective_note, website_url = None, company.website
         if objective is Objective.PROFILE_TRAFFIC and not await self._profile_traffic_ok(gateway, company):
@@ -82,10 +86,10 @@ class Planning(PlanInteractions):
         minimum = snapshot.min_budget_imp if objective is Objective.REACH else snapshot.min_budget_high_freq
         max_groups = max(MIN_GROUPS_FOR_BUDGET, min(MAX_GROUPS_CAP, snapshot.daily_cap.amount_minor // (minimum.amount_minor or 1)))
         questionnaire = Questionnaire(company_name=company.name, instagram_handle=company.instagram_handle, website=company.website,
-                                      geo=company.profile.get("geo"), objective=objective, notes=edit_request)
+                                      geo=company.profile.get("geo"), objective=objective, notes=request)
         has_audience = engagement is not None and engagement >= MIN_RETARGETING_AUDIENCE
         try:
-            interests = await self._discover_interests(gateway, company, passport, facts, objective, countries, edit_request)
+            interests = await self._discover_interests(gateway, company, passport, facts, objective, countries, request)
             proposal = await strategize(self._llm, StrategyInput(
                 passport=passport, user_facts=user_facts, external_facts=external, questionnaire=questionnaire,
                 daily_cap=snapshot.daily_cap, min_group_budget=minimum, interests=interests, history=history, max_groups=max_groups,
@@ -97,7 +101,7 @@ class Planning(PlanInteractions):
             copies, verdicts, copy_notes = [], [], []
             for group in proposal.groups:
                 copy, verdict, notes = await write_reviewed_copy(
-                    self._llm, self._copy_input(company, passport, objective, group, user_facts, external, assets[0], edit_request),
+                    self._llm, self._copy_input(company, passport, objective, group, user_facts, external, assets[0], request),
                     {"targeting": {"countries": list(countries), "hypothesis": group.hypothesis.value},
                      "user_facts": user_facts, "external_facts": external, "language": passport.voice.language, "objective": objective},
                     fact_texts=[f.text for f in facts], captions=assets[2], label=group.name,
@@ -109,7 +113,9 @@ class Planning(PlanInteractions):
             return await self._stop(chat_id, "failed", f"{reason}\nДанные сохранены — можно повторить.", [[retry]])
         ctx = PlanContext(
             currency=snapshot.currency, daily_cap=snapshot.daily_cap, min_budget_imp=snapshot.min_budget_imp,
-            min_budget_high_freq=snapshot.min_budget_high_freq, active_daily_total=Money(int(snapshot.active_total), snapshot.currency),
+            min_budget_high_freq=snapshot.min_budget_high_freq,
+            # запуск плана снимает текущую кампанию (retire_previous): её бюджеты потолок не съедают
+            active_daily_total=Money(0, snapshot.currency),
             interest_catalog=catalog, engagement_audience_size=engagement, lookalike_source_size=engagement,
             broad_audience_size=broad, facts=tuple(f.text for f in facts), creative_ids=frozenset(assets[1]),
             has_uploaded_media=assets[3], language=passport.voice.language,
@@ -117,8 +123,10 @@ class Planning(PlanInteractions):
             fallback_objective=objective.value, demo=bool(company.profile.get("demo")))
         validated = validate_plan(proposal, ctx, copy=copies, verdicts=verdicts)
         extra = [engagement_note] if engagement_note else []
+        if edit_request and proposal.notes.strip():  # итог правки: что изменено или почему план прежний
+            extra.insert(0, proposal.notes.replace(DEMO_MARK, "").strip())
         data = plan_data_from_validated(validated, name=company.name, website_url=website_url)
-        data.update(privacy_policy_url=company.profile.get("privacy_url"), edit_request=edit_request,
+        data.update(privacy_policy_url=company.profile.get("privacy_url"), edit_request=edit_request, edit_chain=list(chain),
                     dsa_beneficiary=(company.profile.get("dsa") or {}).get("beneficiary"),
                     dsa_payor=(company.profile.get("dsa") or {}).get("payor"),
                     target_cpa=({"amount_minor": target.amount_minor, "currency": target.currency} if target else None),
@@ -178,6 +186,16 @@ class Planning(PlanInteractions):
         await self._io(self._save_approvals, plan, approvals)
         await self._notifier.send(chat_id, text, [[go_button, *row]])
         return PlanOutcome("proposed", plan.id, text)
+
+    def _edit_chain(self, company_id: int, edit_request: str | None, retry: bool) -> list[str]:
+        """Все правки текущей цепочки планов: прежние из последней версии плюс новая (повтор не дублирует свою)."""
+        if edit_request is None:
+            return []
+        latest = self._db.plans.latest(company_id)
+        prior = list(latest.data.get("edit_chain") or []) if latest and latest.status in ("proposed", "draft") else []
+        if retry and prior and prior[-1] == edit_request:
+            prior.pop()
+        return [*prior, edit_request]
 
     def _store(self, company_id: int, data: dict, status: str) -> Plan:
         """Новая версия плана; предыдущие неподтверждённые устаревают вместе со своими кнопками."""

@@ -12,8 +12,11 @@ async def test_free_text_fills_fields_and_company_is_written_only_by_confirm_but
     await intake.handle_text(CHAT, TEXT)
     await env.press(intake, "Демо Германия")
     await env.press(intake, "Studio Yoga Berlin")
+    assert "Instagram, связанный со страницей «Studio Yoga Berlin» (@demo_yoga_de)" in env.labels()
+    await env.press(intake, "Instagram, связанный")
 
     summary = env.last()
+    assert "Instagram: @demo_yoga_de" in summary  # выбранный аккаунт, а не набранный текст
     assert format_ru(Money(150000, "EUR")) in summary
     assert "валюта вашего рекламного аккаунта" in summary
     assert "@coffee_x" in summary and "Берлин" in summary
@@ -21,7 +24,7 @@ async def test_free_text_fills_fields_and_company_is_written_only_by_confirm_but
     await env.press(intake, "Всё верно")
     company = env.db.companies.list()[0]
     assert company.monthly_limit == Money(150000, "EUR")
-    assert (company.currency, company.instagram_handle) == ("EUR", "coffee_x")
+    assert (company.currency, company.instagram_handle, company.name) == ("EUR", "demo_yoga_de", "@coffee_x")
     assert company.ad_account_id == "act_100000000000002" and company.ig_user_id
 
 
@@ -30,6 +33,7 @@ async def test_second_press_of_confirm_does_not_create_second_company(env):
     await intake.handle_text(CHAT, TEXT)
     await env.press(intake, "Демо Германия")
     await env.press(intake, "Studio Yoga Berlin")
+    await env.press(intake, "Instagram, связанный")
     data = env.callback("Всё верно")
 
     await intake.handle_callback(CHAT, data)
@@ -73,6 +77,7 @@ async def test_amount_in_other_currency_is_asked_again_in_account_currency_witho
     await intake.handle_text(CHAT, TEXT)
     await env.press(intake, "Демо США")
     await env.press(intake, "Кофейня Север")
+    await env.press(intake, "Instagram, связанный")
 
     assert "USD" in env.last() and "Курс я не пересчитываю" in env.last()
     assert env.db.companies.list() == []
@@ -96,6 +101,7 @@ async def test_desired_result_price_is_extracted_shown_and_saved_without_extra_q
     await intake.handle_text(CHAT, TEXT + ", цена сообщения до 3 евро")
     await env.press(intake, "Демо Германия")
     await env.press(intake, "Studio Yoga Berlin")
+    await env.press(intake, "Instagram, связанный")
 
     assert format_ru(Money(300, "EUR")) in env.last() and "Желаемая цена результата" in env.last()
     assert format_ru(Money(150000, "EUR")) in env.last()  # бюджет не перепутан с ценой
@@ -108,6 +114,7 @@ async def test_summary_says_city_is_shown_by_country_and_unknown_place_asks_for_
     await intake.handle_text(CHAT, TEXT)
     await env.press(intake, "Демо Германия")
     await env.press(intake, "Studio Yoga Berlin")
+    await env.press(intake, "Instagram, связанный")
     assert "город Берлин → показ по стране Германия: точный радиус пока не поддерживается" in env.last()
 
     await env.press(intake, "Отмена")

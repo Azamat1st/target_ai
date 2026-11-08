@@ -338,3 +338,29 @@ async def test_existing_post_with_unknown_id_is_dropped_with_a_note_and_text_is_
     assert plan.status == "draft" and plan.data["groups"] == []
     assert any("постом 999 убран" in n for n in plan.data["notes"])
     assert any("группа без объявлений" in n for n in plan.data["notes"])
+
+
+def _remember(env, company):
+    env.db.history.create(HistoryEntry(company_id=company.id, kind="week", hypothesis="Интересы",
+                                       outcome="цена заявки 4 евро", created_at=env.clock.now()))
+
+
+async def test_new_media_plan_phrase_builds_a_new_version_with_history_note(env):
+    company, ids = ready(env)
+    _remember(env, company)
+    intake = env.intake(script(ids))
+
+    handled = await intake.handle_text(CHAT, "новый медиаплан для Кофейня")
+
+    assert handled and "Учтено из прошлого: Интересы: цена заявки 4 евро" in env.last()
+    assert env.db.plans.latest(company.id).status == "proposed"
+
+
+async def test_new_media_plan_button_entry_builds_plan_with_history_note(env):
+    company, ids = ready(env)
+    _remember(env, company)
+    intake = env.intake(script(ids))
+
+    await intake.new_plan(company.id, CHAT)
+
+    assert "Учтено из прошлого" in env.last()

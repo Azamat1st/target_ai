@@ -12,6 +12,8 @@ from . import pending
 from .menu import DEMO_ONLY_TEXT, LEVEL_WORDS, main_menu, start_text
 
 LEVEL_MENU_STATUSES = ("done",)
+CANCEL_PENDING = "pnd:cancel"
+CANCEL_ROW = [[("✖️ Отмена", CANCEL_PENDING)]]
 
 
 async def say(app, chat_id: int, text: str, buttons=None) -> None:
@@ -34,6 +36,7 @@ async def say_with_menu(app, chat_id: int, text: str) -> None:
 
 async def show_start(app, chat_id: int) -> None:
     await pending.clear_pending(app, chat_id)
+    await app.intake.reset(chat_id)
     await say_with_menu(app, chat_id, start_text(await app.levels.current()))
 
 
@@ -53,9 +56,9 @@ async def start_add(app, chat_id: int) -> None:
     await app.intake.start_add_company(chat_id)
 
 
-async def show_report(app, chat_id: int, company_id: int | None = None) -> None:
+async def show_report(app, chat_id: int, company_id: int | None = None, period: str = "day") -> None:
     await pending.clear_pending(app, chat_id)
-    await say(app, chat_id, await app.ops.reporting.on_demand(company_id))
+    await say(app, chat_id, await app.ops.reporting.on_demand(company_id, period))
 
 
 async def show_log(app, chat_id: int, page: int = 0, company_id: int | None = None) -> None:
@@ -76,7 +79,7 @@ async def ask_setting(app, chat_id: int, key: str) -> None:
         await say(app, chat_id, str(exc))
         return
     await pending.set_pending(app, chat_id, pending.SETTING + key)
-    await say(app, chat_id, prompt + "\n\nНапишите новое значение или нажмите любую кнопку меню, чтобы отменить.")
+    await say(app, chat_id, prompt + "\n\nНапишите новое значение или нажмите «✖️ Отмена».", CANCEL_ROW)
 
 
 async def ask_limit(app, chat_id: int, company_id: int) -> None:
@@ -86,7 +89,17 @@ async def ask_limit(app, chat_id: int, company_id: int) -> None:
         return
     await pending.set_pending(app, chat_id, f"{pending.LIMIT}{company_id}")
     await say(app, chat_id, f"Новый месячный лимит для «{company.name}»? Напишите сумму, например «1500 евро». "
-                            "Перед изменением я спрошу подтверждение.")
+                            "Перед изменением я спрошу подтверждение.", CANCEL_ROW)
+
+
+async def new_plan(app, chat_id: int, company_id: int) -> None:
+    """«🧭 Новый медиаплан»: план с учётом истории компании; прежняя кампания снимется при запуске нового."""
+    await pending.clear_pending(app, chat_id)
+    if await asyncio.to_thread(app.db.companies.get, company_id) is None:
+        await say(app, chat_id, "Такой компании нет.")
+        return
+    await say(app, chat_id, "Составляю новый медиаплан с учётом того, что уже пробовали…")
+    await app.intake.new_plan(company_id, chat_id)
 
 
 async def run_check(app, chat_id: int) -> None:

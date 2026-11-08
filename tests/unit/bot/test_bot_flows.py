@@ -24,6 +24,7 @@ async def test_questionnaire_from_start_to_summary_in_demo(env):
     await env.tg.say(OWNER, "добавь кофейню @coffee_x, Берлин, 1500 евро в месяц, нужны сообщения")
     await env.tg.press_button(OWNER, "Демо Германия")
     await env.tg.press_button(OWNER, "Studio Yoga Berlin")
+    await env.tg.press_button(OWNER, "Instagram, связанный")
 
     summary = env.tg.last(OWNER)
     assert "Всё верно" in " ".join(summary.labels)
@@ -202,3 +203,68 @@ async def test_test_to_live_switch_leaves_scheduled_jobs_untouched(make_env):
     await env.app.levels.confirm(reply.approval_id)
 
     assert {(j.kind, j.company_id): j.due_at for j in env.db.jobs.list()} == before
+
+
+async def test_weekly_report_on_request_gives_weekly_review(env):
+    make_company(env)
+
+    await env.tg.say(OWNER, "отчёт за неделю")
+
+    assert "Недельный разбор" in env.tg.last(OWNER).text
+
+
+def test_main_with_rejected_bot_token_prints_russian_message_without_traceback(monkeypatch, capsys, tmp_path):
+    from aiogram.exceptions import TelegramUnauthorizedError
+    from aiogram.methods import GetMe
+    from pydantic import SecretStr
+
+    from target_ai import __main__ as entry
+    from target_ai.config import Settings
+
+    settings = Settings(_env_file=None, telegram_bot_token=SecretStr("123456:REVOKED"), telegram_allowed_ids=(OWNER,),
+                        database_path=tmp_path / "c.sqlite3")
+    monkeypatch.setattr(entry, "load_settings", lambda: settings)
+
+    async def rejected(self):
+        raise TelegramUnauthorizedError(GetMe(), "Unauthorized")
+    monkeypatch.setattr(App, "run", rejected)
+
+    code = entry.main()
+
+    err = capsys.readouterr().err
+    assert code != 0 and "Telegram не принял токен бота" in err and "TELEGRAM_BOT_TOKEN" in err
+    assert "Traceback" not in err and "123456:REVOKED" not in err
+
+
+def test_main_with_malformed_bot_token_prints_russian_message_without_traceback(monkeypatch, capsys, tmp_path):
+    from pydantic import SecretStr
+
+    from target_ai import __main__ as entry
+    from target_ai.config import Settings
+
+    settings = Settings(_env_file=None, telegram_bot_token=SecretStr("not-a-token"), telegram_allowed_ids=(OWNER,),
+                        database_path=tmp_path / "c.sqlite3")
+    monkeypatch.setattr(entry, "load_settings", lambda: settings)
+
+    code = entry.main()
+
+    err = capsys.readouterr().err
+    assert code != 0 and "Telegram не принял токен бота" in err and "Traceback" not in err
+
+
+
+async def test_run_with_rejected_token_closes_bot_session_before_exit(env, monkeypatch):
+    from aiogram.exceptions import TelegramUnauthorizedError
+    from aiogram.methods import DeleteWebhook
+
+    closed = []
+
+    async def close():
+        closed.append(True)
+    monkeypatch.setattr(env.tg.session, "close", close)
+    env.tg.session.fail_next(DeleteWebhook, TelegramUnauthorizedError(DeleteWebhook(), "Unauthorized"))
+
+    with pytest.raises(TelegramUnauthorizedError):
+        await env.app.run()
+
+    assert closed == [True]

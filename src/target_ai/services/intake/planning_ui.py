@@ -19,6 +19,8 @@ STATE_EDIT, STATE_PRIVACY, STATE_CPA = "plan:edit", "plan:privacy", "plan:cpa"
 STATE_DSA_BENEFICIARY, STATE_DSA_PAYOR = "plan:dsa_beneficiary", "plan:dsa_payor"
 KIND_START, KIND_EDIT, KIND_CANCEL, KIND_GO = "plan_start", "plan_edit", "plan_cancel", "plan_go"
 KIND_CPA = "plan_cpa"
+KIND_QCANCEL = "plan_qcancel"
+QUESTION_STATES = (STATE_PRIVACY, STATE_CPA, STATE_DSA_BENEFICIARY, STATE_DSA_PAYOR)
 RESULT_NOUN = {
     Objective.DIRECT_MESSAGES: "сообщения", Objective.LEAD_FORM: "заявки", Objective.WEBSITE_TRAFFIC: "перехода на сайт",
     Objective.PROFILE_TRAFFIC: "визита в профиль", Objective.REACH: "1 000 охвата",
@@ -59,6 +61,11 @@ class PlanInteractions:
         approval = await self._io(self._db.approvals.get, approval_id)
         if approval is None:
             return False
+        if approval.kind == KIND_QCANCEL:
+            if await self._consume(chat_id, approval_id):
+                await self._io(self._db.dialogs.delete, chat_id)
+                await self._notifier.send(chat_id, "Вопрос снят. Ничего не записано и не запущено.", [])
+            return True
         if approval.kind == KIND_START:
             if await self._consume(chat_id, approval_id):
                 await self.propose(int(approval.payload["company_id"]), chat_id)
@@ -190,13 +197,13 @@ class PlanInteractions:
             return
         await self._update_profile(int(data["company_id"]), {"privacy_url": url})
         await self._io(self._db.dialogs.delete, chat_id)
-        await self.propose(int(data["company_id"]), chat_id, edit_request=data.get("edit_request"))
+        await self.propose(int(data["company_id"]), chat_id, edit_request=data.get("edit_request"), retry=True)
 
     async def _answer_payor(self, chat_id: int, data: dict, payor: str) -> None:
         dsa = {"beneficiary": data["beneficiary"], "payor": payor[:MAX_FIELD]}
         await self._update_profile(int(data["company_id"]), {"dsa": dsa})
         await self._io(self._db.dialogs.delete, chat_id)
-        await self.propose(int(data["company_id"]), chat_id, edit_request=data.get("edit_request"))
+        await self.propose(int(data["company_id"]), chat_id, edit_request=data.get("edit_request"), retry=True)
 
     async def _update_profile(self, company_id: int, changes: dict) -> None:
         def apply() -> None:
@@ -207,7 +214,11 @@ class PlanInteractions:
     # ------------------------------------------------------------------ мелочи
     async def _ask(self, chat_id: int, state: str, data: dict, question: str, buttons=None) -> None:
         await self._io(self._db.dialogs.save, DialogState(chat_id=chat_id, state=state, data=data, updated_at=self._clock.now()))
-        await self._notifier.send(chat_id, question, buttons or [])
+        if not buttons:
+            cancel = button(self._db, self._clock.now(), "✖️ Отмена", KIND_QCANCEL, "cancel", data.get("company_id"),
+                            {"chat_id": chat_id})
+            buttons = [[cancel]]
+        await self._notifier.send(chat_id, question, buttons)
 
     async def _consume(self, chat_id: int, approval_id: str) -> bool:
         if await self._io(self._db.approvals.consume, approval_id, self._clock.now()) is None:

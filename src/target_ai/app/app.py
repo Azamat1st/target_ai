@@ -154,8 +154,8 @@ class App:
         self.db.close()
 
     async def run(self) -> None:
-        await self.startup()
-        try:
+        try:  # сбой старта (например, Telegram не принял токен) тоже закрывает сессию бота
+            await self.startup()
             await self.dispatcher.start_polling(
                 self.bot, polling_timeout=POLLING_TIMEOUT_SECONDS, handle_signals=True, close_bot_session=False,
                 allowed_updates=self.dispatcher.resolve_used_update_types())

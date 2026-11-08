@@ -70,6 +70,7 @@ async def reach_plan(e: E2E, currency: str = "EUR", cpa: int = 3, text: str | No
     await e.tg.say(OWNER, text or template.format(cpa=cpa))
     await e.tg.press_button(OWNER, account)
     await e.tg.press_button(OWNER, page)
+    await e.tg.press_button(OWNER, "Instagram, связанный")
     await e.tg.press_button(OWNER, "Всё верно")
     await e.tg.press_button(OWNER, "Пропустить")
     await e.tg.press_button(OWNER, "Составить медиаплан")

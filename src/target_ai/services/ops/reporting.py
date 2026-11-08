@@ -7,6 +7,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from target_ai.agents import ReportInput, report
+from target_ai.clock import to_account_time
+from target_ai.config.runtime import DEFAULT_TZ
 from target_ai.llm import LLMError
 from target_ai.money import Money, format_ru
 from target_ai.storage import Company, HistoryEntry
@@ -18,6 +20,7 @@ log = logging.getLogger(__name__)
 
 KIND_WEEKLY = "weekly_insight"
 WEEK = 7
+CHANGES_SCAN = 1000
 
 
 def _cpa(spend_minor: int, results: int, currency: str) -> Money | None:
@@ -37,13 +40,14 @@ class Reporting:
             texts.append(text)
         return texts
 
-    async def on_demand(self, company_id: int | None = None) -> str:
-        """Отчёт по одной компании или по всем (company_id=None)."""
+    async def on_demand(self, company_id: int | None = None, period: str = "day") -> str:
+        """Отчёт по одной компании или по всем (company_id=None); period="week" — недельный разбор."""
         companies = ([await self._ctx.company(company_id)] if company_id
                      else await self._ctx.active_companies())
         if not companies:
             return "Компаний пока нет."
-        return "\n\n".join([await self.daily_text(c.id) for c in companies])
+        build = self.weekly if period == "week" else self.daily_text
+        return "\n\n".join([await build(c.id) for c in companies])
 
     async def day_line(self, company_id: int) -> str:
         """Одна строка про вчерашний день компании (для итога перемотки)."""
@@ -71,7 +75,7 @@ class Reporting:
                  f"Расход вчера: {format_ru(Money(spend_day, cur))}; с начала месяца: "
                  f"{format_ru(Money(spend_month, cur))}{self._of_limit(company, spend_month)}.",
                  self._results_line(company, results_day, spend_day, cur)]
-        changes = await self._changes(company)
+        changes = await self._changes(company, yesterday)
         lines.append("Изменения за сутки: " + ("; ".join(changes) if changes else "не было."))
         return strip_tags("\n".join(lines))
 
@@ -117,12 +121,13 @@ class Reporting:
         cpa = _cpa(spend, results, cur)
         return f"{title}: расход {format_ru(Money(spend, cur))}, результатов {results}, цена {fmt(cpa)}."
 
-    async def _changes(self, company: Company) -> list[str]:
-        ctx, since = self._ctx, self._ctx.clock.now() - timedelta(hours=24)
-        entries = await ctx.io(ctx.db.audit.list, company_id=company.id, order_by="-id", limit=100)
+    async def _changes(self, company: Company, since: date) -> list[str]:
+        """Применённые решения из журнала, начиная с даты `since` по часам и поясу аккаунта (в демо — симулированным)."""
+        ctx, tz = self._ctx, company.timezone or DEFAULT_TZ
+        entries = await ctx.io(ctx.db.audit.list, company_id=company.id, order_by="-id", limit=CHANGES_SCAN)
         return [e.data["reason"] for e in reversed(entries)
                 if e.action.startswith("decision:") and e.data.get("outcome") == "ok" and e.data.get("reason")
-                and e.created_at and e.created_at >= since]
+                and e.created_at and to_account_time(e.created_at, tz).date() >= since]
 
     async def _groups_block(self, company: Company, rows, cur: str) -> list[str]:
         ctx = self._ctx
@@ -148,7 +153,7 @@ class Reporting:
             stats = tuple({"date": r.date, "id": r.meta_id, "spend": fmt(r.spend), "results": r.results} for r in rows)
             history = tuple(f"{h.kind}: {h.outcome} {h.data.get('name', '')}"
                             for h in await ctx.io(ctx.db.history.list, company_id=company.id, order_by="-id", limit=20))
-            changes = tuple(await self._changes(company))
+            changes = tuple(await self._changes(company, ctx.account_today(company) - timedelta(days=WEEK)))
             result = await report(ctx.llm, ReportInput(company_name=company.name, period="week", stats=stats,
                                                         changes=changes, history=history,
                                                         target_cpa=fmt(company.target_cpa)))

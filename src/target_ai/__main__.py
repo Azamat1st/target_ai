@@ -6,12 +6,17 @@ import asyncio
 import logging
 import sys
 
+from aiogram.exceptions import TelegramUnauthorizedError
+from aiogram.utils.token import TokenValidationError
+
 from target_ai.app import App, AppConfigError
 from target_ai.config import Settings, load_settings
 from target_ai.logging_setup import setup_logging
 
 logger = logging.getLogger("target_ai")
 EXIT_CONFIG = 2
+BAD_TOKEN_TEXT = ("Telegram не принял токен бота — проверьте TELEGRAM_BOT_TOKEN в .env "
+                  "(токен выдаёт @BotFather), затем запустите бота снова.")
 
 
 def check_settings(settings: Settings) -> str | None:
@@ -41,8 +46,14 @@ def main() -> int:
     except AppConfigError as exc:
         sys.stderr.write(f"{exc}\n")
         return EXIT_CONFIG
+    except TokenValidationError:
+        sys.stderr.write(BAD_TOKEN_TEXT + "\n")
+        return EXIT_CONFIG
     try:
         asyncio.run(app.run())
+    except TelegramUnauthorizedError:
+        sys.stderr.write(BAD_TOKEN_TEXT + "\n")
+        return EXIT_CONFIG
     except KeyboardInterrupt:
         logger.info("Остановлено по Ctrl+C.")
     return 0

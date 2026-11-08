@@ -14,6 +14,9 @@ from .extract import OBJECTIVE_TITLES
 MAX_NOTES = 4
 NOTE_LIMIT = 170
 HISTORY_LINES = 3
+NEEDS_REVIEW = "needs_review"
+NEEDS_CLAUDE_TEXT = ("Вне демо объявления проверяет Контролёр на Claude, а ключа нет: добавьте ANTHROPIC_API_KEY "
+                     "в .env и перезапустите бота — тогда план можно будет запускать.")
 
 
 def _clip(text: str, limit: int = NOTE_LIMIT) -> str:
@@ -41,6 +44,8 @@ def render_plan(*, company_name: str, version: int, validated: ValidatedPlan, ex
         lines.append("Учтено из прошлого: " + "; ".join(_clip(h, 80) for h in history[:HISTORY_LINES]))
     warnings = [*([objective_note] if objective_note else []), *([spend_cap_warning] if spend_cap_warning else []),
                 *validated.blockers_ru, *validated.notes_ru, *extra_notes]
+    if any(NEEDS_REVIEW in w for w in warnings):  # внутренний код причины пользователю не показываем
+        warnings = [NEEDS_CLAUDE_TEXT, *(w.replace(f" ({NEEDS_REVIEW})", "") for w in warnings if NEEDS_REVIEW not in w)]
     for warning in warnings[:MAX_NOTES + 2]:
         lines.append(f"⚠️ {_clip(warning)}")
     if len(warnings) > MAX_NOTES + 2:

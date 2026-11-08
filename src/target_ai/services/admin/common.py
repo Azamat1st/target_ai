@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import asyncio
 from dataclasses import dataclass, field
 from typing import Any
@@ -69,3 +70,12 @@ def intent_of(db: Database, approval_id: str) -> dict[str, Any] | None:
     if approval is None or approval.status != "pending":
         return None
     return approval.payload.get("intent")
+
+
+_ID_PREFIX = re.compile(r"(?m)^\d{9,}:\s*защитный лимит")
+_RAW_ID = re.compile(r"\b\d{9,}\b:?\s*")
+
+
+def hide_meta_ids(text: str) -> str:
+    """Сырые ID объектов Meta пользователю не нужны: «123…: защитный лимит X» -> «Защитный лимит кампании: X»."""
+    return _RAW_ID.sub("", _ID_PREFIX.sub("Защитный лимит кампании:", text))

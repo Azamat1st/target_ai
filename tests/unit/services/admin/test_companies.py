@@ -160,3 +160,33 @@ async def test_confirmation_intent_lives_in_approval_payload_not_settings(env):
 
     assert env.db.approvals.get(ask.approval_id).payload["intent"]["mode"] == "autonomous"
     assert not [k for k in env.db.settings.list() if k.startswith("admin_pending")]
+
+
+async def test_card_has_new_media_plan_button(env):
+    company = env.company()
+
+    card = await service(env).card(company.id)
+
+    assert ("🧭 Новый медиаплан", f"cmp:plan:{company.id}") in [b for row in card.buttons for b in row]
+
+
+async def test_card_after_month_limit_is_spent_says_paused_by_limit_not_working(env):
+    company = env.company()  # лимит 1 000,00 $
+    env.own_campaign(company)
+    adset = env.db.objects.create(MetaObject(company_id=company.id, meta_id="as1", kind="adset", name="g",
+                                             created_at=env.clock.now()))
+    env.db.stats.upsert(DailyStat(meta_id=adset.meta_id, company_id=company.id, date="2026-11-05",
+                                  spend=Money(120_000, "USD")))
+
+    card = await service(env).card(company.id)
+
+    assert "Статус: на паузе — лимит месяца исчерпан" in card.text
+    assert "Работает" not in card.text
+
+
+def test_raw_meta_object_ids_are_hidden_from_user_text():
+    from target_ai.services.admin.common import hide_meta_ids
+
+    text = hide_meta_ids("120200000000001: защитный лимит 5,00 $")
+
+    assert "1202000" not in text and "защитный лимит кампании" in text.lower()

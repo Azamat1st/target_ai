@@ -41,11 +41,24 @@ class Onboarding:
     # ------------------------------------------------------------------ вход
     async def start(self, chat_id: int, text: str | None = None) -> None:
         """«➕ Компания» (text=None) или «добавь кофейню @x, Берлин, …» — один путь к одной анкете."""
+        old = await self._dialog(chat_id)
         data: dict[str, Any] = {}
         if text:
             data = await self._prefill(text)
+        if old is not None:
+            await self._say(chat_id, self._discarded_text(old.data))
         await self._save(chat_id, data)
         await self._advance(chat_id, data)
+
+    @staticmethod
+    def _discarded_text(old: dict) -> str:
+        who = f" (@{old['handle']})" if old.get("handle") else ""
+        return f"Прошлая анкета{who} отменена."
+
+    async def reset(self, chat_id: int) -> None:
+        """/start и другие «выходы»: незаконченная анкета снимается."""
+        if await self._dialog(chat_id) is not None:
+            await self._io(self._db.dialogs.delete, chat_id)
 
     async def handle_text(self, chat_id: int, text: str) -> bool:
         dialog = await self._dialog(chat_id)
@@ -191,6 +204,8 @@ class Onboarding:
             return await self._choose_account(chat_id, data)
         if not data.get("page"):
             return await self._choose_page(chat_id, data)
+        if not data.get("ig_user_id"):
+            return await self._choose_instagram(chat_id, data)
         account_currency = data["account"]["currency"]
         if data.get("amount_currency") not in (None, account_currency):
             return await self._ask(chat_id, data, "amount_account",
@@ -249,19 +264,45 @@ class Onboarding:
             return await self._set_account(chat_id, data, value)
         if field == "page":
             return await self._set_page(chat_id, data, value)
+        if field == "ig":
+            username = payload.get("username")  # выбранный аккаунт, а не набранный текст, идёт в анкету и карточку
+            typed = {"name": data.get("name") or f"@{data['handle']}"} if data.get("handle") else {}
+            return await self._next(chat_id, {**data, **typed, "ig_user_id": value,
+                                              **({"handle": username} if username else {})})
 
     async def _set_account(self, chat_id: int, data: dict, account: dict) -> None:
         await self._next(chat_id, {**data, "account": account})
 
     async def _set_page(self, chat_id: int, data: dict, page: dict) -> None:
+        stale = {k: v for k, v in data.items() if k != "ig_user_id"}
+        await self._next(chat_id, {**stale, "page": page})
+
+    async def _choose_instagram(self, chat_id: int, data: dict) -> None:
+        """R12: Instagram-аккаунт, связанный со страницей, выбирается кнопкой; ник из текста — только подсказка."""
+        page = data["page"]
+        await self._save(chat_id, {**data, "step": "instagram"})
         try:
             ig_id = await self._factory(False).get_page_instagram(page["id"])
         except MetaError as exc:
             return await self._no_assets(chat_id, f"Не удалось проверить Instagram страницы: {exc.user_message_ru}")
         if not ig_id:
-            await self._save(chat_id, {**data, "step": "page"})
+            await self._save(chat_id, {k: v for k, v in data.items() if k != "page"} | {"step": "page"})
             return await self._no_assets(chat_id, f"К странице «{page['name']}» не привязан Instagram business-аккаунт. {LINK_HINT}")
-        await self._next(chat_id, {**data, "page": page, "ig_user_id": ig_id})
+        hint = f"Вы писали @{data['handle']} — это подсказка, ник проверяет Meta. " if data.get("handle") else ""
+        username = await self._ig_username(ig_id)
+        label = f"Instagram, связанный со страницей «{page['name']}» ({'@' + username if username else 'ID ' + str(ig_id)})"
+        await self._say(chat_id, f"{hint}Выберите Instagram-аккаунт для рекламы:",
+                        [[self._pick(label, chat_id, field="ig", value=str(ig_id), username=username)],
+                         [self._cancel_button(chat_id)]])
+
+    async def _ig_username(self, ig_id: str) -> str | None:
+        """Ник аккаунта по чтению профиля; нет доступа — кнопка останется с ID."""
+        try:
+            profile = await self._factory(False).get_ig_profile(str(ig_id))
+        except MetaError as exc:
+            log.info("Профиль Instagram %s не прочитан: %s", ig_id, exc)
+            return None
+        return str(profile.get("username") or "").lstrip("@") or None
 
     # ------------------------------------------------------------------ сводка и запись
     async def _summary(self, chat_id: int, data: dict) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import timedelta
 
 from target_ai import policy
 from target_ai.executor import ExecutorError, PolicyDenied
@@ -18,6 +19,7 @@ log = logging.getLogger(__name__)
 
 CB_APPLY, CB_CANCEL = "ops:apply:", "ops:cancel:"
 APPROVAL_KIND = "optimizer_scale"
+EXHAUSTED_MARK = "лимит месяца исчерпан"
 MODEL_ACTIONS = {"pause_ad": "pause_ad", "pause_group": "pause_group"}
 
 
@@ -117,8 +119,18 @@ class Optimization:
             elif item.status in ("denied", "failed"):
                 lines.append(f"Не применено: {item.message_ru}")
         approval, buttons = await self._offer(company_id, actionable, pending, lines)
+        lines = self._collapse_exhausted(company, lines)
         return OptimizationResult(company_id, tuple(strip_tags(x) for x in lines), await self._fresh(company, warnings), approval,
                                   None, buttons)
+
+    def _collapse_exhausted(self, company, lines: list[str]) -> list[str]:
+        """Остановка по исчерпанию лимита — одно сообщение, а не по строке на каждую группу."""
+        rest = [x for x in lines if EXHAUSTED_MARK not in x]
+        if len(rest) == len(lines):
+            return lines
+        today = self._ctx.account_today(company)
+        first_next = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
+        return [*rest, f"Лимит месяца исчерпан — кампании на паузе до {first_next:%d.%m} или до увеличения лимита."]
 
     async def _offer(self, company_id, decisions, pending, lines):
         if not pending:

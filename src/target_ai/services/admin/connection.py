@@ -74,8 +74,8 @@ class ConnectionReport:
         if self.can_live:
             return "Итог: можно переходить и в тестовый, и в боевой уровень."
         if self.can_test:
-            return "Итог: в тестовый уровень можно, в боевой пока нельзя — исправьте пункты с ❌."
-        return "Итог: пока нельзя ни в тестовый, ни в боевой — исправьте пункты с ❌."
+            return "Итог: боевой уровень закрыт, пока не исправлены пункты с ❌; тестовому они не мешают."
+        return "Итог: пункты с ❌ мешают и тестовому, и боевому уровню — исправьте их."
 
     @property
     def text(self) -> str:
@@ -164,16 +164,16 @@ class ConnectionCheck:
             return None
 
     @staticmethod
-    def _meta_failure(title: str, exc: MetaError) -> CheckLine:
+    def _meta_failure(title: str, exc: MetaError, *, blocks_test: bool = False) -> CheckLine:
         token_trouble = exc.kind in ("token_expired", "token_invalid")
         head = "Токен Meta не принят." if token_trouble else f"{title}: Meta вернула ошибку."
-        return CheckLine(FAIL, head, exc.user_message_ru, token_trouble)
+        return CheckLine(FAIL, head, exc.user_message_ru, token_trouble or blocks_test)
 
     async def _token_lines(self, gateway) -> tuple[list[CheckLine], bool]:
         try:
             info = await gateway.debug_token()
         except MetaError as exc:
-            return [self._meta_failure("Токен Meta", exc)], False
+            return [self._meta_failure("Токен Meta", exc, blocks_test=True)], False  # без токена нет и теста
         if not info.is_valid:
             return [CheckLine(FAIL, "Токен Meta недействителен.",
                               f"Выпустите новый токен и обновите META_ACCESS_TOKEN ({README_TOKEN}).", True)], False

@@ -12,6 +12,8 @@ from .geo import Place, find_place
 HANDLE_RE = re.compile(r"^@?([A-Za-z0-9._]{1,30})$")
 _HANDLE_IN_TEXT = re.compile(r"@([A-Za-z0-9._]{1,30})")
 _URL = re.compile(r"https?://[^\s,]+", re.IGNORECASE)
+_TLDS = "com|net|org|de|ru|io|co|uk|eu|app|shop|store|info|ua|kz|uz|by|fr|it|es|pl|nl|ch|at|me|ai|biz|online|site|cafe|pro|us|ca|tr|jp|in|br|au"
+_BARE_SITE = re.compile(rf"(?<![@\w.\-/])((?:[a-z0-9][a-z0-9\-]*\.)+(?:{_TLDS}))\b(?![@\w])(/[^\s,]*)?", re.IGNORECASE)
 _CURRENCY = (r"долл\w*|usd|eur|евро|руб\w*|rub|[$€£₽¥₺₸]|jpy|[иий]ен\w*|фунт\w*|gbp|тенге|kzt|тг|сум\w*|uzs|лир\w*")
 AMOUNT_RE = re.compile(
     rf"[$€£₽¥₺₸]?\s*\d[\d  .,]*\d(?:\s*(?:тыс\w*|млн))?(?:\s*(?:{_CURRENCY}))?"
@@ -76,9 +78,10 @@ def extract_fields(text: str) -> Extracted:
     cpa_text, text = split_cpa(text)
     handle = _HANDLE_IN_TEXT.search(text)
     site = _URL.search(text)
+    bare = None if site else _BARE_SITE.search(_HANDLE_IN_TEXT.sub(" ", text))
     return Extracted(
         handle=handle.group(1) if handle else None,
-        website=site.group(0).rstrip(".") if site else None,
+        website=site.group(0).rstrip(".") if site else (f"https://{bare.group(0).rstrip('.')}" if bare else None),
         place=find_place(text),
         objective=parse_objective(text),
         amount_text=find_amount_fragment(text),

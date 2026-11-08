@@ -6,6 +6,7 @@
 
 import re
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel
@@ -36,6 +37,7 @@ from .schemas import (
     Explanation,
 )
 
+MIN_GROUPS_OFFLINE = 2
 HEADLINE_MAX = 40
 CAPS_SHARE_MAX = 0.3
 TEXT_MAX = 2200
@@ -97,12 +99,82 @@ def media_plan(task: dict[str, Any]) -> MediaPlanProposal:
     if with_retargeting:
         groups.append(GroupProposal(name=_mark("Ретаргетинг"), hypothesis=Hypothesis.RETARGETING, budget_share=shares[2],
                                     locations=geo, rationale=_mark("шаблон")))
+    request = str(q.get("notes") or "").strip()
+    note = ""
+    for step in filter(None, (r.strip() for r in request.split("\n"))):  # накопленные правки по порядку; отказ ничего не откатывает
+        groups, note = _apply_edit(groups, step)
     return MediaPlanProposal(
         objective=objective,
         objective_rationale=_mark("цель из анкеты или паспорта"),
         groups=tuple(groups),
-        notes=_mark("План по шаблону"),
+        notes=_mark(note or "План по шаблону"),
     )
+
+
+_HYPOTHESIS_STEMS = (
+    ("ретаргет", Hypothesis.RETARGETING), ("похож", Hypothesis.LOOKALIKE),
+    ("интерес", Hypothesis.INTERESTS), ("широк", Hypothesis.BROAD),
+)
+HYPOTHESIS_NAMES = {Hypothesis.RETARGETING: "Ретаргетинг", Hypothesis.LOOKALIKE: "Похожие",
+                    Hypothesis.INTERESTS: "Интересы", Hypothesis.BROAD: "Широкая"}
+_REMOVE_RE = re.compile(r"\b(убер|убра|удал|без|исключ)\w*", re.IGNORECASE)
+_MORE_RE = re.compile(r"\b(больш|увелич|подним|добав)\w*", re.IGNORECASE)
+_LESS_RE = re.compile(r"\b(меньш|уменьш|сниз|убав)\w*", re.IGNORECASE)
+SHARE_STEP = Decimal("0.2")
+SHARE_FLOOR = Decimal("0.1")
+EDIT_HELP = ("Без ключа Claude понимаю только простые правки: «убери ретаргетинг» (или интересы, широкую группу) "
+             "и «больше на интересы» / «меньше на широкую». Остальное станет доступно после добавления "
+             "ANTHROPIC_API_KEY в .env.")
+
+
+def _mentioned(request: str) -> Hypothesis | None:
+    low = request.lower()
+    for stem, hypothesis in _HYPOTHESIS_STEMS:
+        if stem in low:
+            return hypothesis
+    return None
+
+
+def _renormalise(groups: list[GroupProposal]) -> list[GroupProposal]:
+    total = sum(g.budget_share for g in groups)
+    shares = [(g.budget_share / total).quantize(Decimal("0.01")) for g in groups]
+    shares[0] += Decimal(1) - sum(shares)
+    return [g.model_copy(update={"budget_share": s}) for g, s in zip(groups, shares, strict=True)]
+
+
+def _apply_edit(groups: list[GroupProposal], request: str) -> tuple[list[GroupProposal], str]:
+    """Простые правки словами без Claude: убрать группу или сдвинуть долю бюджета. Остальное — честный отказ."""
+    target = _mentioned(request)
+    if target is None:
+        return groups, EDIT_HELP
+    index = next((i for i, g in enumerate(groups) if g.hypothesis is target), None)
+    name = HYPOTHESIS_NAMES[target]
+    if _REMOVE_RE.search(request):
+        if index is None:
+            return groups, f"Группы «{name}» в плане нет — план не изменился."
+        if len(groups) <= MIN_GROUPS_OFFLINE:
+            return groups, f"Группу «{name}» не убрал: в плане должно остаться минимум {MIN_GROUPS_OFFLINE} группы."
+        kept = [g for i, g in enumerate(groups) if i != index]
+        return _renormalise(kept), f"Убрал группу «{name}», бюджет перераспределён."
+    sign = 1 if _MORE_RE.search(request) else -1 if _LESS_RE.search(request) else 0
+    if sign == 0:
+        return groups, EDIT_HELP
+    if index is None:
+        return groups, f"Группы «{name}» в плане нет — план не изменился."
+    others = [g for i, g in enumerate(groups) if i != index]
+    room = sum(g.budget_share - SHARE_FLOOR for g in others) if sign > 0 else groups[index].budget_share - SHARE_FLOOR
+    delta = min(SHARE_STEP, room)
+    if delta <= 0:
+        return groups, f"Долю группы «{name}» уже нельзя изменить — план не изменился."
+    shifted = []
+    for i, g in enumerate(groups):
+        if i == index:
+            share = g.budget_share + sign * delta
+        else:
+            share = g.budget_share - sign * delta * (g.budget_share / sum(o.budget_share for o in others)) \
+                if sign > 0 else g.budget_share + delta / len(others)
+        shifted.append(g.model_copy(update={"budget_share": share}))
+    return _renormalise(shifted), f"{'Увеличил' if sign > 0 else 'Уменьшил'} долю группы «{name}»."
 
 
 def ad_copy(task: dict[str, Any]) -> AdCopySet:

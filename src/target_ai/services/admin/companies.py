@@ -13,7 +13,8 @@ from target_ai.notify import Buttons
 from target_ai.storage import Company, Database
 
 from .common import (
-    ACTOR_USER, DONE, ERROR, NEEDS_APPROVAL, SETTING_LEVEL, Journal, Reply, confirm_buttons, intent_of, io, level_title,
+    ACTOR_USER, DONE, ERROR, NEEDS_APPROVAL, SETTING_LEVEL, Journal, Reply, confirm_buttons, hide_meta_ids, intent_of, io,
+    level_title,
 )
 from target_ai.config.runtime import DEFAULT_HALTED, DEFAULT_LEVEL, SETTING_HALTED, SETTING_LEVEL, SETTING_REPORT_TZ
 
@@ -21,6 +22,7 @@ from target_ai.config.runtime import DEFAULT_HALTED, DEFAULT_LEVEL, SETTING_HALT
 #          cmp:mode:<id>:autonomous|confirm · cmp:ok:<подтверждение> · cmp:no:<подтверждение>
 CALLBACK = "cmp"
 MODE_TITLES = {"confirm": "С подтверждением", "autonomous": "Автономный"}
+LIMIT_STATUS = "на паузе — лимит месяца исчерпан"
 APPROVAL_MODE = "mode_autonomous"
 APPROVAL_LIMIT = "limit_amount"  # «Всё верно» на сумму лимита: не денежное разрешение
 OK_LABEL = "✅ Всё верно"
@@ -97,6 +99,7 @@ class Companies:
             else ("▶️ Возобновить", f"{CALLBACK}:resume:{cid}")
         mode_to = "confirm" if row.mode == "autonomous" else "autonomous"
         return [[first, ("💰 Изменить лимит", f"{CALLBACK}:limit:{cid}")],
+                [("🧭 Новый медиаплан", f"{CALLBACK}:plan:{cid}")],
                 [(f"Режим → {MODE_TITLES[mode_to]}", f"{CALLBACK}:mode:{cid}:{mode_to}")],
                 [("← К списку", f"{CALLBACK}:list")]]
 
@@ -157,7 +160,7 @@ class Companies:
 
     async def _reply_for(self, result, company_id: int, intent: dict) -> Reply:
         if result.status != "needs_approval":
-            text = result.message_ru + ("\n" + "\n".join(result.details) if result.details else "")
+            text = hide_meta_ids(result.message_ru + ("\n" + "\n".join(result.details) if result.details else ""))
             return Reply(DONE if result.status in ("done", "partial") else ERROR, text)
         approval = await io(self._executor.create_approval, result.needs_approval, company_id=company_id, intent=intent)
         text = f"{result.message_ru}\n\nПодтвердите, чтобы продолжить."
@@ -229,13 +232,16 @@ class Companies:
     def _row(self, company: Company) -> CompanyRow:
         campaigns = self._db.objects.list(company_id=company.id, kind="campaign")
         live = [c for c in campaigns if c.status not in ("DELETED", "ARCHIVED", "RETIRED")]
+        spent = self._spent_month(company)
         if self._db.settings.get(SETTING_HALTED, DEFAULT_HALTED):
             status = "Стоп-кран"
         elif not live:
             status = "Нет рекламы"
+        elif company.monthly_limit and spent and spent.amount_minor >= company.monthly_limit.amount_minor:
+            status = LIMIT_STATUS
         else:
             status = "Работает" if any(c.status == "ACTIVE" for c in live) else "На паузе"
-        return CompanyRow(company.id, company.name, status, company.mode, self._spent_month(company),
+        return CompanyRow(company.id, company.name, status, company.mode, spent,
                           company.monthly_limit, bool(company.profile.get("demo")))
 
     def _spent_month(self, company: Company) -> Money | None:

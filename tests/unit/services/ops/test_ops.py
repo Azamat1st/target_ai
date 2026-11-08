@@ -48,6 +48,8 @@ async def test_scheduler_failed_job_does_not_stop_others_and_is_reported(world):
 
     assert any(r.kind == "stats_sync" and not r.ok for r in runs) and calls == [company.id]
     assert any("сбой задачи" in t for t in world.notifier.texts)
+    failure = next(t for t in world.notifier.texts if "сбой задачи" in t)
+    assert "обновление статистики" in failure and "stats_sync" not in failure
 
 
 async def test_scheduler_jobs_survive_restart_and_run_only_when_due(world):
@@ -179,3 +181,40 @@ async def test_new_month_runs_rollover_and_notes_it(world):
 
 ACCOUNT_ID = "act_100000000000001"
 _ = Decimal
+
+
+async def test_daily_summary_lists_changes_made_by_optimizer_in_last_day(world):
+    company = world.company(mode="confirm")
+    await world.launch(company)
+
+    result = await world.demo.advance(5)
+
+    moves = [c for c in result.changes if "Оптимизация" in c]
+    texts = [await world.ops.reporting.daily_text(company.id)]
+    assert moves
+    assert "Изменения за сутки: " in texts[0] and "не было" not in texts[0] and "бюджета" in texts[0]
+
+
+async def test_stop_on_exhausted_month_limit_gives_one_message_not_one_per_group(world):
+    company = world.company(mode="confirm", groups=4, limit_major=1000)
+    await world.launch(company)
+    for adset in world.adsets(company):
+        world.seed(company, adset.meta_id, days=1, spend=60_000, results=1, back=1)  # 4 × 600 $ > лимита 1 000 $
+
+    result = await world.ops.optimization.run_daily(company.id)
+
+    exhausted = [line for line in result.lines if "Лимит месяца исчерпан" in line]
+    assert len(exhausted) == 1 and "кампании на паузе до" in exhausted[0]
+    assert sum("лимит месяца исчерпан" in line.lower() for line in result.lines) == 1
+
+
+async def test_daily_summary_and_weekly_review_show_changes_from_earlier_days_of_a_rewind(world):
+    company = world.company(mode="confirm")
+    await world.launch(company)
+    result = await world.demo.advance(7)
+    assert any("Оптимизация" in c for c in result.changes)
+    await world.run_days(2)  # дни без новых решений: изменения остались в окне недели, но не суток
+
+    weekly = await world.ops.reporting.weekly(company.id)
+
+    assert "изменений не было" not in weekly and "бюджета" in weekly

@@ -13,6 +13,7 @@ async def test_questionnaire_to_launch_to_daily_optimization_calls_decide_with_t
     await intake.handle_text(CHAT, "добавь кофейню @coffee_x, Берлин, 1500 евро в месяц, нужны сообщения, цена сообщения до 3 евро")
     await env.press(intake, "Демо Германия")
     await env.press(intake, "Studio Yoga Berlin")
+    await env.press(intake, "Instagram, связанный")
     await env.press(intake, "Всё верно")
     await env.press(intake, "Пропустить")
     await env.press(intake, "Составить медиаплан")

@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery
 
 from target_ai.executor import ExecutorError
 
-from . import actions
+from . import actions, pending
 from .routes import Routes
 from .actions import say, say_reply
 
@@ -20,7 +20,7 @@ router = Routes("callbacks")
 
 STALE_TEXT = "Эта кнопка устарела или уже использована."
 # Кнопки-подтверждения: после нажатия убираем клавиатуру, чтобы не жали второй раз.
-FINAL_PREFIXES = ("ap", "lvl:ok", "lvl:no", "cmp:ok", "cmp:no", "sys:ok", "sys:no", "ops", "launch")
+FINAL_PREFIXES = ("ap", "lvl:ok", "lvl:no", "cmp:ok", "cmp:no", "sys:ok", "sys:no", "ops", "launch", "pnd")
 
 
 @router.callback_query(F.data)
@@ -88,6 +88,9 @@ async def _companies(app, chat_id: int, rest: str) -> bool:
     company_id = int(company_arg)
     if action == "limit":
         await actions.ask_limit(app, chat_id, company_id)
+        return True
+    if action == "plan":
+        await actions.new_plan(app, chat_id, company_id)
         return True
     calls = {"card": lambda: app.companies.card(company_id), "pause": lambda: app.companies.pause(company_id),
              "resume": lambda: app.companies.resume(company_id),
@@ -158,7 +161,13 @@ async def _launch(app, chat_id: int, rest: str) -> bool:
     return True
 
 
-ROUTES = {"ap": _approval, "lvl": _level, "set": _settings, "cmp": _companies, "log": _log, "sys": _system,
+async def _pending_cancel(app, chat_id: int, rest: str) -> bool:
+    await pending.clear_pending(app, chat_id)
+    await say(app, chat_id, "Вопрос снят. Ничего не изменено.")
+    return True
+
+
+ROUTES = {"pnd": _pending_cancel, "ap": _approval, "lvl": _level, "set": _settings, "cmp": _companies, "log": _log, "sys": _system,
           "ops": _ops, "launch": _launch}
 
 

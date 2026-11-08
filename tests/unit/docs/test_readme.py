@@ -70,3 +70,11 @@ def test_docker_files_keep_secrets_and_data_out_of_image() -> None:
         assert entry in ignored
     dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "uv sync --frozen --no-dev" in dockerfile and "USER bot" in dockerfile
+
+
+def test_readme_quotes_the_refusal_text_the_bot_sends_to_strangers() -> None:
+    from target_ai.bot.middleware import DENIED_TEXT
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert f"«{DENIED_TEXT}»" in readme and "Остальным он не отвечает" not in readme
