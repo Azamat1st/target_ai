@@ -169,7 +169,7 @@ class MetaClient:
         return await self._http.request("GET", ad_id, params={"fields": fields})
 
     async def find_by_name_tag(self, parent_id: str, edge: str, tag: str) -> list[dict[str, Any]]:
-        rows = await self._pages(f"{parent_id}/{edge}", {"fields": "id,name,status,effective_status"})
+        rows = await self._pages(f"{parent_id}/{edge}", {"fields": "id,name,status,effective_status,created_time"})
         return [row for row in rows if tag in str(row.get("name", ""))]
 
     async def get_ig_profile(self, ig_user_id: str) -> dict[str, Any]:
