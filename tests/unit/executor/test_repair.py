@@ -500,3 +500,30 @@ async def test_rollback_of_second_launch_makes_previous_campaign_current_and_res
     assert env.fake.object(first.campaign_id)["spend_cap"] == 100000
     resumed = await env.executor().resume_company(company.id)
     assert resumed.status == "done" and env.fake.object(first.campaign_id)["status"] == "ACTIVE"
+
+
+# ================================================================ probe_ig_access (для таска 08)
+async def test_probe_ig_access_succeeds_without_creating_anything(env):
+    company = env.company()
+    before = len(env.fake.objects())
+
+    result = await env.executor().probe_ig_access(company.ad_account_id, company.page_id, company.ig_user_id)
+
+    assert result is None and len(env.fake.objects()) == before
+    assert env.db.objects.list(company_id=company.id) == []
+    assert [r.action for r in env.db.audit.list()] == ["проверка доступа к Instagram"]
+    probe = [r for r in env.mutations() if r.path.endswith("/adcreatives")]
+    assert probe and all("validate_only" in (r.body.get("execution_options") or []) for r in probe)
+
+
+async def test_probe_ig_access_raises_ig_access_error_for_subcode_1815199(env):
+    from target_ai.fakemeta.errors import ig_access_denied
+
+    company = env.company()
+    before = len(env.fake.objects())
+    env.fake.inject_error(r"POST act_\d+/adcreatives", ig_access_denied())
+
+    with pytest.raises(MetaError) as err:
+        await env.executor().probe_ig_access(company.ad_account_id, company.page_id, company.ig_user_id)
+
+    assert err.value.kind == "ig_access" and len(env.fake.objects()) == before

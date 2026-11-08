@@ -5,6 +5,7 @@ from __future__ import annotations
 from target_ai.policy import NeedsApproval
 
 from .controls import Controls
+from .validation import PLACEHOLDER_HASH
 
 
 class Executor(Controls):
@@ -25,3 +26,16 @@ class Executor(Controls):
         kwargs = {"ttl": ttl} if ttl is not None else {}
         return self._db.approvals.create(kind=needs.kind, now=self._clock.now(), company_id=company_id,
                                          payload={"key": needs.key, "summary": needs.summary_ru}, **kwargs)
+
+    async def probe_ig_access(self, account_id: str, page_id: str, ig_user_id: str) -> None:
+        """Проверочное создание креатива (`validate_only`): есть ли у аккаунта доступ к Instagram.
+
+        Ничего не создаёт и не пишет в реестр; отказ Meta пробрасывается как `MetaError`
+        (подсубкод 1815199 - `kind="ig_access"`). В журнал уходит одна строка.
+        """
+        params = {"name": "[ПРОВЕРКА] доступ к Instagram",
+                  "object_story_spec": {"page_id": page_id, "instagram_user_id": ig_user_id,
+                                        "photo_data": {"image_hash": PLACEHOLDER_HASH, "caption": "проверка"}}}
+        await self.audit("system", "проверка доступа к Instagram", None, "ok",
+                         account_id=account_id, page_id=page_id, ig_user_id=ig_user_id)
+        await self.gateway(validate_only=True).create_creative(account_id, params)
