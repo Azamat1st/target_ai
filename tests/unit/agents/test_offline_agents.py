@@ -77,6 +77,20 @@ async def test_offline_strategy_is_broad_plus_interests_with_catalog_keywords():
     assert all(DEMO_MARK in g.name for g in plan.groups)
 
 
+async def test_offline_strategy_adds_retargeting_only_when_available_and_budget_allows():
+    passport = await make_passport()
+    base = dict(passport=passport, questionnaire=Q, daily_cap=ZERO, min_group_budget=ZERO,
+                interests=(InterestOption(name="Кофе", audience_size=900_000),))
+
+    with_retargeting = await strategize(LLM, StrategyInput(**base, retargeting_available=True, max_groups=3))
+    too_few_slots = await strategize(LLM, StrategyInput(**base, retargeting_available=True, max_groups=2))
+    unavailable = await strategize(LLM, StrategyInput(**base, max_groups=4))
+
+    assert [g.hypothesis for g in with_retargeting.groups] == [Hypothesis.BROAD, Hypothesis.INTERESTS, Hypothesis.RETARGETING]
+    assert sum(g.budget_share for g in with_retargeting.groups) == 1
+    assert len(too_few_slots.groups) == len(unavailable.groups) == 2
+
+
 async def test_offline_copy_builds_marked_templates_only_from_facts():
     data = CopyInput(
         user_facts=(PassportFact(text="Открыты с 8 до 22", source="пользователь"),),

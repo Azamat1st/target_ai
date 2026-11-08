@@ -7,6 +7,7 @@ from target_ai.executor import ExecutorError
 from target_ai.storage import Database
 
 from .common import ACTOR_USER, DONE, ERROR, NEEDS_APPROVAL, Reply, confirm_buttons, io
+from target_ai.config.runtime import DEFAULT_HALTED, SETTING_HALTED
 
 CALLBACK = "sys"  # sys:ok:<подтверждение> · sys:no:<подтверждение>
 APPROVAL_KIND = "resume_system"
@@ -21,7 +22,7 @@ class SystemControl:
         return Reply(DONE, report.message_ru)
 
     async def request_resume(self) -> Reply:
-        if not await io(self._db.settings.get, "halted", False):
+        if not await io(self._db.settings.get, SETTING_HALTED, DEFAULT_HALTED):
             return Reply(DONE, "Стоп-кран не включён: возобновлять нечего.")
         approval = await io(self._db.approvals.create, kind=APPROVAL_KIND, now=self._clock.now())
         text = ("Снять стоп-кран?\n\nЧто изменится: система снова сможет включать и увеличивать расход. "

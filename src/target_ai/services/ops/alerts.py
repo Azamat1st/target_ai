@@ -10,7 +10,7 @@ from target_ai.meta.errors import MetaError
 from target_ai.money import Money, format_ru
 from target_ai.storage import Company
 
-from .common import OpsContext, comma
+from .common import OpsContext, comma, strip_tags
 
 log = logging.getLogger(__name__)
 
@@ -58,8 +58,9 @@ class Alerts:
     async def _once(self, key: str, text: str) -> list[str]:
         ctx = self._ctx
         if await ctx.io(ctx.db.alerts.mark, key, ctx.clock.now()):
-            await ctx.emit(text)
-            return [text]
+            shown = strip_tags(text)
+            await ctx.emit(shown)
+            return [shown]
         return []
 
     async def _send_once(self, company: Company, key: str, text: str) -> bool:

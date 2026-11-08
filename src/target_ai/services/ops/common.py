@@ -15,24 +15,9 @@ from typing import Any
 from target_ai.clock import Clock, to_account_time
 from target_ai.money import Money, format_ru
 from target_ai.storage import Company, Database
+from target_ai.config.runtime import DEFAULT_TZ, SETTING_THRESHOLDS, Thresholds
 
 log = logging.getLogger(__name__)
-
-DEFAULT_TZ = "UTC"
-SETTING_THRESHOLDS = "alert_thresholds"
-SETTING_REPORT_TIME = "report_time"  # "HH:MM"
-SETTING_REPORT_TZ = "report_tz"
-DEFAULT_REPORT_TIME = "10:00"
-
-
-@dataclass(frozen=True)
-class Thresholds:
-    """Пороги уведомлений (спека, история 58); меняются в настройках."""
-
-    no_impressions_hours: int = 6
-    spend_spike_ratio: Decimal = Decimal("1.5")
-    cpa_spike_ratio: Decimal = Decimal("2.0")
-    token_days: int = 7
 
 
 class OpsContext:

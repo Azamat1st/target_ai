@@ -175,6 +175,16 @@ def test_budget_moves_from_weak_and_paused_groups_to_strong_without_growing_the_
     assert after <= before
 
 
+def test_cut_text_promises_a_transfer_only_when_a_strong_group_exists():
+    only_weak = run([grp("w1", spend=700, results=2), grp("w2", spend=800, results=2)])
+    with_strong = run([grp("w1", spend=700, results=2), grp("strong", spend=600, results=5)])
+
+    weak_texts = [d.reason_ru for d in by_kind(only_weak, "set_budget")]
+    assert weak_texts and all("сильных групп пока нет — бюджет не перераспределялся" in t for t in weak_texts)
+    assert not any("переносится" in t for t in weak_texts)
+    assert "бюджет переносится на сильные группы" in next(d.reason_ru for d in by_kind(with_strong, "set_budget") if d.target_id == "w1")
+
+
 def test_recipient_gets_no_more_than_twenty_percent_even_if_pool_is_larger():
     groups = [grp("strong", 1_000, spend=600, results=5),
               grp("bad1", 1_000, spend=1_000, results=1), grp("bad2", 1_000, spend=1_000, results=1)]
@@ -307,6 +317,41 @@ def test_rebalancing_alone_never_grows_total_and_scaling_never_exceeds_cap(seed)
 
 def test_pace_does_nothing_when_budgets_fit_under_cap():
     assert enforce_pace(snapshot([grp("g1", 1_000), grp("g2", 1_000)])) == []
+
+
+def test_pace_ignores_an_excess_below_one_percent_of_the_cap():
+    groups = [grp("g1", 1_510), grp("g2", 1_510)]  # 30,20 $ при потолке 30,00 $: превышение 0,7%
+    snap = snapshot(groups, spent_month=usd(100_000 - 48_000))
+    assert snap.daily_cap == usd(3_000)
+    assert enforce_pace(snap) == []
+
+
+def test_pace_still_trims_an_excess_of_one_percent_or_more():
+    groups = [grp("g1", 1_515), grp("g2", 1_515)]  # 30,30 $ при потолке 30,00 $: ровно 1%
+    snap = snapshot(groups, spent_month=usd(100_000 - 48_000))
+    decisions = enforce_pace(snap)
+    assert sum(d.new_budget.amount_minor for d in decisions) <= 3_000
+
+
+@pytest.mark.parametrize("currency, limit, spent, budgets", [
+    ("USD", 100_000, 13_000, (25_000, 25_000)),  # остаток 870 $, превышение 0,58%
+    ("USD", 100_000, 97_500, (720, 720)),        # остаток 25 $
+    ("JPY", 10_000, 9_000, (288, 288)),          # остаток ¥1000
+    ("JPY", 10_000, 9_800, (115,)),              # остаток ¥200, потолок ¥114
+])
+def test_pace_noise_is_trimmed_on_the_last_day_when_worst_day_would_exceed_the_remainder(currency, limit, spent, budgets):
+    money = lambda x: Money(x, currency)
+    groups = tuple(GroupState(id=f"g{i}", campaign_id="c1", daily_budget=money(b)) for i, b in enumerate(budgets))
+    snap = CompanySnapshot(
+        company_id=1, currency=currency, timezone="UTC", now=datetime(2026, 11, 30, 9, tzinfo=UTC), mode="autonomous",
+        level="live", is_demo=False, halted=False, monthly_limit=money(limit), spent_month=money(spent),
+        min_budget_imp=money(100), min_budget_high_freq=money(100), groups=groups,
+        campaigns=(CampaignState(id="c1", spent=money(0)),), own_object_ids=frozenset({"c1"} | {g.id for g in groups}))
+
+    decisions = enforce_pace(snap)
+
+    assert decisions and all(d.lowers_for_limit for d in decisions)
+    assert sum(d.new_budget.amount_minor for d in decisions) <= snap.daily_cap.amount_minor
 
 
 def test_exhausted_month_pauses_everything_with_explanation():

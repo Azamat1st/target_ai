@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from target_ai.clock import Clock, SimClock
+from target_ai.config.runtime import DEFAULT_LEVEL, LEVEL_DEMO, SETTING_LEVEL
 
 
 class LevelClock:
@@ -14,7 +15,7 @@ class LevelClock:
         self._sim, self._real, self._db = sim, real, db
 
     def now(self) -> datetime:
-        if self._db.settings.get("level", "demo") == "demo":
+        if self._db.settings.get(SETTING_LEVEL, DEFAULT_LEVEL) == LEVEL_DEMO:
             return self._sim.now()
         return self._real.now()
 

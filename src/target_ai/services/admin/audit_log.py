@@ -10,6 +10,7 @@ from target_ai.notify import Buttons
 from target_ai.storage import AuditEntry, Database
 
 from .common import io
+from target_ai.config.runtime import SETTING_REPORT_TZ
 
 CALLBACK = "log"  # log:page:<номер с 0>:<id компании или 0>
 PAGE_SIZE = 10
@@ -57,7 +58,7 @@ class AuditLog:
         filters = {} if company_id is None else {"company_id": company_id}
         rows = self._db.audit.list(order_by="-id", limit=(page + 1) * PAGE_SIZE + 1, **filters)
         names = {c.id: c.name for c in self._db.companies.list()}
-        tz = self._db.settings.get("report_tz", self._settings.report_tz)
+        tz = self._db.settings.get(SETTING_REPORT_TZ, self._settings.report_tz)
         return rows, names, tz
 
     @staticmethod

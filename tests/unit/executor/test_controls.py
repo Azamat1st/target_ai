@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from target_ai.agents.schemas import AdVariant
@@ -145,6 +147,53 @@ async def test_month_rollover_refreshes_spend_cap_to_spent_plus_remaining(env):
     outcome = await ex.month_rollover(company.id)
 
     assert outcome.status == "done" and env.fake.object(result.campaign_id)["spend_cap"] == 50000
+
+
+class HaltsAfter:
+    """Шлюз, после успешного вызова которого поднимается стоп-кран (кнопка нажата, пока шёл запрос)."""
+
+    def __init__(self, inner, env, method):
+        self._inner, self._env, self._method = inner, env, method
+
+    def __getattr__(self, name):
+        attr = getattr(self._inner, name)
+        if name != self._method:
+            return attr
+
+        async def call(*args, **kwargs):
+            result = await attr(*args, **kwargs)
+            self._env.db.settings.set("halted", True)
+            return result
+        return call
+
+
+async def test_budget_raise_is_rolled_back_when_halt_rises_during_the_request(env):
+    company = env.company(mode="autonomous")
+    result = await launched(env, env.executor(), company)
+    group = env.live("adset")[0]["id"]
+    before = env.fake.object(group)["daily_budget"]
+    ex = env.executor(lambda client: HaltsAfter(client, env, "set_daily_budget"))
+
+    report = await ex.apply_decisions(company.id, [OptimizerDecision("scale", group, Money(before + 200, "USD"), "рост")])
+
+    assert result.status == LAUNCHED
+    assert report.applied[0].status == "denied" and "Стоп-кран" in report.applied[0].message_ru
+    assert env.fake.object(group)["daily_budget"] == before
+    assert env.db.objects.get_by_meta_id(group).daily_budget == Money(before, "USD")
+
+
+async def test_spend_cap_raise_is_rolled_back_when_halt_rises_during_the_request(env):
+    company = env.company(mode="autonomous")
+    result = await launched(env, env.executor(), company)
+    await env.executor().set_monthly_limit(company.id, Money(50000, "USD"))
+    capped = env.fake.object(result.campaign_id)["spend_cap"]
+    env.db.companies.update(replace(env.db.companies.get(company.id), monthly_limit=Money(100000, "USD")))
+    ex = env.executor(lambda client: HaltsAfter(client, env, "set_spend_cap"))
+
+    outcome = await ex.month_rollover(company.id)
+
+    assert outcome.status == "failed" and "Стоп-кран" in outcome.message_ru
+    assert env.fake.object(result.campaign_id)["spend_cap"] == capped
 
 
 async def test_test_level_validates_without_leaving_objects_and_never_activates(env):

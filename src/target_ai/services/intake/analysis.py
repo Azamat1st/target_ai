@@ -17,6 +17,7 @@ from target_ai.storage import DialogState, Fact, MediaAsset, Passport as Passpor
 from .media import store_file
 from .passport_view import USER_SOURCE, render_passport
 from .texts import button
+from target_ai.config.runtime import DEFAULT_LEVEL, SETTING_LEVEL
 
 log = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ class Analysis:
 
     # ------------------------------------------------------------------ источники
     async def _api_available(self, company) -> bool:
-        level = await self._io(self._db.settings.get, "level", "demo")
+        level = await self._io(self._db.settings.get, SETTING_LEVEL, DEFAULT_LEVEL)
         return level != "demo" and bool(company.ig_user_id)
 
     async def _collect_instagram(self, company) -> tuple[dict | None, list[dict]]:

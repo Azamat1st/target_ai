@@ -7,6 +7,7 @@ from datetime import timedelta
 
 from .common import OpsContext
 from .reporting import Reporting
+from target_ai.config.runtime import DEFAULT_LEVEL, LEVEL_DEMO, SETTING_LEVEL
 
 MAX_DAYS = 31
 DAILY_PREFIX, WEEKLY_PREFIX, OPTIMIZER_PREFIX = "Сводка —", "Недельный разбор —", "Оптимизация —"
@@ -32,7 +33,7 @@ class DemoTime:
         ctx = self._ctx
         if not 1 <= days <= MAX_DAYS:
             raise ValueError(f"Перемотка — от 1 до {MAX_DAYS} дней.")
-        if ctx.db.settings.get("level", "demo") != "demo":
+        if ctx.db.settings.get(SETTING_LEVEL, DEFAULT_LEVEL) != LEVEL_DEMO:
             raise ValueError("Перемотка времени доступна только на демо-уровне.")
         day_lines, extra, weekly, buttons = [], [], None, []
         with ctx.quiet() as outbox:

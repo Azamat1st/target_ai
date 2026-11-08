@@ -11,12 +11,11 @@ from target_ai.logging_setup import mask_secrets
 from target_ai.storage import Database, Job
 
 from . import schedule as sch
+from target_ai.config.runtime import DEFAULT_REPORT_TIME, DEFAULT_TZ, SETTING_REPORT_TIME, SETTING_REPORT_TZ
 
 log = logging.getLogger(__name__)
 
 Handler = Callable[[int], Awaitable[object]]
-DEFAULT_REPORT_TIME = "10:00"
-DEFAULT_TZ = "UTC"
 
 
 @dataclass(frozen=True)
@@ -80,8 +79,8 @@ class Scheduler:
 
     def _next(self, kind: str, company_id: int) -> datetime:
         company = self._db.companies.get(company_id) if company_id else None
-        tz = self._db.settings.get("report_tz") or (company.timezone if company else None) or DEFAULT_TZ
-        at = sch.parse_hhmm(self._db.settings.get("report_time") or DEFAULT_REPORT_TIME)
+        tz = self._db.settings.get(SETTING_REPORT_TZ) or (company.timezone if company else None) or DEFAULT_TZ
+        at = sch.parse_hhmm(self._db.settings.get(SETTING_REPORT_TIME) or DEFAULT_REPORT_TIME)
         return sch.next_due(kind, self._clock.now(), tz, at)
 
     async def _run(self, job: Job) -> JobRun | None:

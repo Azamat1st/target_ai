@@ -22,6 +22,7 @@ from target_ai.storage import Company, DialogState
 from .extract import HANDLE_RE, MAX_AMOUNT_FRAGMENT, OBJECTIVE_TITLES, extract_fields, find_amount_fragment, parse_objective
 from .geo import find_place
 from .texts import button
+from target_ai.config.runtime import DEFAULT_LEVEL, SETTING_LEVEL
 
 log = logging.getLogger(__name__)
 
@@ -309,7 +310,7 @@ class Onboarding:
         if data.get("step") != "confirm" or "limit" not in data:
             return await self._say(chat_id, "Анкета не готова к записи. Продолжим по вопросам.")
         limit = Money(int(data["limit"]["amount_minor"]), data["limit"]["currency"])
-        level = await self._io(self._db.settings.get, "level", "demo")
+        level = await self._io(self._db.settings.get, SETTING_LEVEL, DEFAULT_LEVEL)
         company = Company(
             name=data.get("name") or f"@{data['handle']}", instagram_handle=data["handle"], website=data.get("website"),
             ad_account_id=data["account"]["id"], page_id=data["page"]["id"], ig_user_id=data["ig_user_id"],

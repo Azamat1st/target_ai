@@ -16,9 +16,10 @@ from target_ai.meta.errors import MetaError
 from target_ai.agents.schemas import NOT_FOUND
 from target_ai.money import Money, MoneyError, format_ru, from_major
 from target_ai.policy import PlanContext, validate_plan
+from target_ai.policy.rules import MIN_RETARGETING_AUDIENCE
 from target_ai.storage import MediaAsset, Plan
 
-from .audience import build_catalog, estimate_size
+from .audience import DEMO_SEED_KEYWORDS, build_catalog, estimate_size, seed_keywords
 from .copy_flow import write_reviewed_copy
 from .media import store_file
 from .plan_view import render_plan
@@ -82,11 +83,13 @@ class Planning(PlanInteractions):
         max_groups = max(MIN_GROUPS_FOR_BUDGET, min(MAX_GROUPS_CAP, snapshot.daily_cap.amount_minor // (minimum.amount_minor or 1)))
         questionnaire = Questionnaire(company_name=company.name, instagram_handle=company.instagram_handle, website=company.website,
                                       geo=company.profile.get("geo"), objective=objective, notes=edit_request)
+        has_audience = engagement is not None and engagement >= MIN_RETARGETING_AUDIENCE
         try:
+            interests = await self._discover_interests(gateway, company, passport, facts, objective, countries, edit_request)
             proposal = await strategize(self._llm, StrategyInput(
                 passport=passport, user_facts=user_facts, external_facts=external, questionnaire=questionnaire,
-                daily_cap=snapshot.daily_cap, min_group_budget=minimum, history=history, max_groups=max_groups,
-                retargeting_available=engagement is not None, lookalike_available=engagement is not None))
+                daily_cap=snapshot.daily_cap, min_group_budget=minimum, interests=interests, history=history, max_groups=max_groups,
+                retargeting_available=has_audience, lookalike_available=engagement is not None))
             proposal = proposal.model_copy(update={"objective": objective})
             keywords = [k for g in proposal.groups for k in g.interest_keywords]
             catalog, search_notes = await build_catalog(gateway, company.ad_account_id, objective, company.page_id, countries, keywords)
@@ -221,6 +224,18 @@ class Planning(PlanInteractions):
         return CopyInput(user_facts=user_facts, external_facts=external, voice=passport.voice, company_name=company.name,
                          objective=objective, hypothesis=f"{group.hypothesis.value}: {group.name}. {group.rationale}",
                          segment=segment, creatives=creatives, feedback=edit_request)
+
+    async def _discover_interests(self, gateway, company, passport, facts, objective, countries,
+                                  edit_request) -> tuple[InterestOption, ...]:
+        """Интересы из поиска Meta по словам компании — до Стратега, чтобы он выбирал из найденного, а не из головы."""
+        texts = [company.name, edit_request or "", *(f.text for f in facts), passport.offer, passport.audience]
+        words = seed_keywords(t for t in texts if t and NOT_FOUND not in t)
+        catalog, _ = await build_catalog(gateway, company.ad_account_id, objective, company.page_id, countries, words)
+        if not catalog and company.profile.get("demo"):
+            catalog, _ = await build_catalog(gateway, company.ad_account_id, objective, company.page_id, countries,
+                                             DEMO_SEED_KEYWORDS)
+        found = {i.name: i.audience_size for infos in catalog.values() for i in infos}
+        return tuple(InterestOption(name=name, audience_size=size) for name, size in found.items())
 
     async def _history(self, company_id: int) -> tuple[str, ...]:
         rows = await self._io(self._db.history.list, company_id=company_id)

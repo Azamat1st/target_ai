@@ -45,7 +45,7 @@ BUSINESS_DISCOVERY_FIELDS = (
     "media{caption,like_count,comments_count,media_type,permalink,timestamp}"
 )
 PAGE_SIZE = 100
-AUDIENCE_TAG_FIELDS = "id,name"  # у аудиторий нет status/effective_status: лишнее поле Meta отвергает
+AUDIENCE_TAG_FIELDS = "id,name,time_created"  # у аудиторий нет status/effective_status (лишнее поле Meta отвергает), время — time_created
 MONEY_KEYS = ("daily_budget", "lifetime_budget", "spend_cap", "bid_amount")
 VALIDATE_ONLY = "validate_only"
 SYNC_REVIEW = "synchronous_ad_review"

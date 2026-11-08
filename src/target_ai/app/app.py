@@ -30,6 +30,7 @@ from .clock import LevelClock
 from .gateways import LevelGateways
 from .levels import ClockAwareLevelSwitch
 from .scheduling import DEFAULT_TICK_SECONDS, LockedScheduler, Ticker
+from target_ai.config.runtime import DEFAULT_LEVEL, SETTING_LEVEL
 
 log = logging.getLogger(__name__)
 
@@ -175,7 +176,7 @@ class App:
     async def _announce_start(self) -> None:
         from target_ai.bot.menu import main_menu
 
-        level = str(self.db.settings.get("level", "demo"))
+        level = str(self.db.settings.get(SETTING_LEVEL, DEFAULT_LEVEL))
         text = f"Бот запущен. Уровень работы: {level_title(level)}."
         if self.telegram is None:
             await self._tell(text)

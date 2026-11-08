@@ -18,12 +18,12 @@ from target_ai.clock import Clock
 from target_ai.config import Settings
 from target_ai.fakemeta import FakeGraphAPI
 from target_ai.meta import MetaClient
+from target_ai.config.runtime import DEFAULT_LEVEL, SETTING_LEVEL
 
 log = logging.getLogger(__name__)
 
 DEMO_TOKEN = "demo-token"
 TEST_TOKEN = "test-token"
-SETTING_LEVEL = "level"
 
 
 class GatewayUnavailable(RuntimeError):
@@ -38,7 +38,7 @@ class LevelGateways:
         self._clients: dict[tuple[str, bool], MetaClient] = {}
 
     def __call__(self, validate_only: bool = False) -> MetaClient:
-        level = self._db.settings.get(SETTING_LEVEL, "demo")
+        level = self._db.settings.get(SETTING_LEVEL, DEFAULT_LEVEL)
         return self._client("fake" if level == "demo" else "real", validate_only)
 
     def real(self, validate_only: bool = False) -> MetaClient:

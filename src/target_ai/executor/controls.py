@@ -18,8 +18,15 @@ from .errors import ApprovalInvalid, ApprovalRequired, ExecutorError, PolicyDeni
 from .results import AppliedDecision, ChangeResult, DecisionsReport, PauseReport
 from .spec import parse_spec
 from .validation import Validation
+from target_ai.config.runtime import SETTING_HALTED
 
 log = logging.getLogger(__name__)
+
+
+class HaltRolledBack(PolicyDenied):
+    """Стоп-кран поднялся во время запроса, и изменение уже откатано (отказ до вызова — обычный `PolicyDenied`)."""
+
+
 SHRINK_KINDS = ("pause_group", "pause_ad")
 
 
@@ -27,7 +34,7 @@ class Controls(Validation):
     # ------------------------------------------------------------------ пауза
     async def halt_all(self, *, actor: str = "user") -> PauseReport:
         """Сначала флаг, потом паузы; ошибка на одной кампании не прерывает остальные."""
-        await self.io(self._db.settings.set, "halted", True)
+        await self.io(self._db.settings.set, SETTING_HALTED, True)
         await self.audit(actor, "halt_all", None, "ok")
         campaigns = await self.io(self._all_campaigns, None)  # реестр мог отстать от Meta: паузим все, не только ACTIVE
         report = await self._pause_campaigns(campaigns, actor, "Стоп-кран")
@@ -81,7 +88,7 @@ class Controls(Validation):
         if not self.peek_keys_any(approval_id, "resume_system"):
             raise ApprovalInvalid("Подтверждение «Возобновить систему» не найдено, использовано или просрочено.")
         await self.io(self.consume, approval_id)
-        await self.io(self._db.settings.set, "halted", False)
+        await self.io(self._db.settings.set, SETTING_HALTED, False)
         await self.audit(actor, "resume_system", None, "ok", approval_id=approval_id)
         return ChangeResult("done", "Стоп-кран снят. Ничего не включено: возобновляйте компании по одной.")
 
@@ -162,11 +169,12 @@ class Controls(Validation):
         await self.io(self.consume, approval_id)
         applied: list[AppliedDecision] = []
         stopped = False
+        budgets = {g.id: g.daily_budget for g in snap.groups}
         for decision, verdict in verdicts:
             if stopped:
                 applied.append(AppliedDecision(decision.target_id, decision.kind, "skipped", "Пакет остановлен."))
                 continue
-            item = await self._apply_one(company_id, decision, verdict, actor)
+            item = await self._apply_one(company_id, decision, verdict, actor, budgets.get(decision.target_id))
             applied.append(item)
             stopped = item.status != "applied" and self._is_shrinking(decision)
         done = sum(1 for a in applied if a.status == "applied")
@@ -177,7 +185,8 @@ class Controls(Validation):
     def _is_shrinking(decision: OptimizerDecision) -> bool:
         return decision.kind in SHRINK_KINDS or (decision.kind == "set_budget" and decision.lowers_for_limit)
 
-    async def _apply_one(self, company_id: int, decision: OptimizerDecision, verdict, actor: str) -> AppliedDecision:
+    async def _apply_one(self, company_id: int, decision: OptimizerDecision, verdict, actor: str,
+                         previous: Money | None = None) -> AppliedDecision:
         target, kind = decision.target_id, decision.kind
         if isinstance(verdict, Denied):
             await self.audit(actor, f"decision:{kind}", company_id, "denied", target=target, code=verdict.code)
@@ -197,11 +206,25 @@ class Controls(Validation):
                                   lambda: self.gateway().set_daily_budget(target, budget))
                 await self.io(self.set_registry, target, daily_budget=budget,
                               last_budget_change_at=self._clock.now())
+                if not self._is_shrinking(decision) and self.is_halted():  # стоп-кран поднят, пока шёл запрос
+                    await self._revert_budget(actor, company_id, target, previous)
+                    raise PolicyDenied("Стоп-кран включён во время запроса: бюджет возвращён.", "halted")
         except PolicyDenied as exc:
             return AppliedDecision(target, kind, "denied", exc.reason_ru)
         except MetaError as exc:
             return AppliedDecision(target, kind, "failed", exc.user_message_ru)
         return AppliedDecision(target, kind, "applied", decision.reason_ru)
+
+    async def _revert_budget(self, actor: str, company_id: int, target: str, previous: Money | None) -> None:
+        if previous is None:
+            log.error("Стоп-кран поднят во время роста бюджета %s, прежний бюджет неизвестен", target)
+            return
+        try:
+            await self.mutate("system", company_id, "decision:rollback_halt", {"target": target, "actor": actor},
+                              lambda: self.gateway().set_daily_budget(target, previous))
+            await self.io(self.set_registry, target, daily_budget=previous)
+        except Exception:
+            log.exception("Не удалось вернуть бюджет %s после стоп-крана", target)
 
     # ------------------------------------------------------------------ лимиты
     async def set_monthly_limit(self, company_id: int, new_limit: Money, approval_id: str | None = None,
@@ -235,7 +258,10 @@ class Controls(Validation):
 
     async def month_rollover(self, company_id: int, approval_id: str | None = None, *, actor: str = "system") -> ChangeResult:
         """Новый месяц: защитный лимит текущей кампании = расход + новый остаток (в пределах лимита — без кнопки)."""
-        notes, failure = await self._refresh_caps_safely(company_id, actor)
+        try:
+            notes, failure = await self._refresh_caps_safely(company_id, actor)
+        except HaltRolledBack as exc:  # стоп-кран поднялся во время запроса: лимит уже возвращён
+            return ChangeResult("failed", f"Защитные лимиты не обновлены: {exc.reason_ru}")
         if failure:
             return ChangeResult("failed", f"Защитные лимиты не обновлены: {failure}", details=tuple(notes))
         await self.io(self.consume, approval_id)
@@ -274,7 +300,20 @@ class Controls(Validation):
 
             await self.mutate(actor, company_id, "spend_cap", {"campaign": campaign.id, "cap": target.amount_minor}, call)
             await self.io(self.save_cap, campaign.id, target)
+            if raising and self.is_halted():  # стоп-кран поднят, пока шёл запрос: лимит назад
+                await self._revert_cap(company_id, campaign)
+                raise HaltRolledBack("Стоп-кран включён во время запроса: защитный лимит возвращён.", "halted")
             notes.append(f"{campaign.id}: защитный лимит {format_ru(target)}")
+
+    async def _revert_cap(self, company_id: int, campaign) -> None:
+        if campaign.spend_cap is None:  # лимит появился там, где его не было: расход он не повышает
+            return
+        try:
+            await self.mutate("system", company_id, "spend_cap", {"campaign": campaign.id, "cap": campaign.spend_cap.amount_minor},
+                              lambda: self.gateway().set_spend_cap(campaign.id, campaign.spend_cap))
+            await self.io(self.save_cap, campaign.id, campaign.spend_cap)
+        except Exception:
+            log.exception("Не удалось вернуть защитный лимит %s после стоп-крана", campaign.id)
 
     # ------------------------------------------------------------------ исправление отклонённого
     async def apply_creative_fix(self, ad_id: str, copy, approval_id: str | None = None, *, actor: str = "user") -> ChangeResult:

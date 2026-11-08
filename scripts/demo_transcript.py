@@ -24,7 +24,7 @@ from target_ai.llm import OfflineLLM  # noqa: E402
 
 OWNER = 111
 OUT = ROOT / "docs" / "demo-transcript.md"
-ADD_TEXT = "добавь кофейню @coffee_x, Берлин, 1500 евро в месяц, нужны сообщения, цена сообщения до 3 евро"
+ADD_TEXT = "добавь кофейню @coffee_x, Берлин, 1500 евро в месяц, нужны сообщения, цена сообщения до 9 евро"
 HEADER = """# Стенограмма демо-прогона
 
 Сгенерировано `scripts/demo-transcript.sh`. Демо-уровень, без ключей и сети: модель — `OfflineLLM`,

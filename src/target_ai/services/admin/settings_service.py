@@ -3,24 +3,22 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from target_ai.clock import Clock
 from target_ai.config import Settings
+from target_ai.config.runtime import (
+    DEFAULT_REPORT_TIME, SETTING_REPORT_TIME, SETTING_REPORT_TZ, SETTING_RULES, SETTING_THRESHOLDS, Thresholds,
+)
 from target_ai.policy import OptimizerRules
 from target_ai.storage import Database
 
 from .common import ACTOR_USER, DONE, ERROR, Journal, Reply, io
 
 CALLBACK = "set"  # set:show · set:edit:<ключ>
-SETTING_RULES = "optimizer_rules"  # те же ключи читают Исполнитель и сервисы «после запуска»
-SETTING_THRESHOLDS = "alert_thresholds"
-SETTING_REPORT_TIME = "report_time"
-SETTING_REPORT_TZ = "report_tz"
-DEFAULT_REPORT_TIME = "10:00"
 MAX_HOURS = 720
 TIME_PATTERN = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
@@ -57,8 +55,8 @@ SPECS: tuple[SettingSpec, ...] = (
     _spec("thr.spend_spike_ratio", "Тревога: всплеск расхода (×)", "decimal", 1.1, 100, "×"),
     _spec("thr.cpa_spike_ratio", "Тревога: рост цены результата (×)", "decimal", 1.1, 100, "×"),
     _spec("thr.token_days", "Предупреждать об окончании токена за (дней)", "int", 1, 90, "дн."),
-    _spec("report_time", "Время ежедневной сводки", "time", hint="Пришлите время в формате ЧЧ:ММ, например 09:30."),
-    _spec("report_tz", "Часовой пояс отчётов", "tz", hint="Пришлите название пояса, например Europe/Moscow."),
+    _spec(SETTING_REPORT_TIME, "Время ежедневной сводки", "time", hint="Пришлите время в формате ЧЧ:ММ, например 09:30."),
+    _spec(SETTING_REPORT_TZ, "Часовой пояс отчётов", "tz", hint="Пришлите название пояса, например Europe/Moscow."),
 )
 SPEC_BY_KEY = {spec.key: spec for spec in SPECS}
 
@@ -91,7 +89,7 @@ class SettingsService:
         if group == "thr":
             saved = self._db.settings.get(SETTING_THRESHOLDS) or {}
             return _coerce(_THRESHOLD_DEFAULTS[name], saved.get(name, _THRESHOLD_DEFAULTS[name]))
-        if key == "report_time":
+        if key == SETTING_REPORT_TIME:
             return self._db.settings.get(SETTING_REPORT_TIME, DEFAULT_REPORT_TIME)
         return self._db.settings.get(SETTING_REPORT_TZ, self._settings.report_tz)
 
@@ -136,7 +134,7 @@ class SettingsService:
             saved[name] = _plain(value)
             self._db.settings.set(SETTING_THRESHOLDS, saved)
         else:
-            self._db.settings.set(SETTING_REPORT_TIME if spec.key == "report_time" else SETTING_REPORT_TZ, value)
+            self._db.settings.set(SETTING_REPORT_TIME if spec.key == SETTING_REPORT_TIME else SETTING_REPORT_TZ, value)
 
     @staticmethod
     def _spec(key: str) -> SettingSpec:
@@ -145,8 +143,7 @@ class SettingsService:
         return SPEC_BY_KEY[key]
 
 
-_THRESHOLD_DEFAULTS: dict[str, Any] = {"no_impressions_hours": 6, "spend_spike_ratio": Decimal("1.5"),
-                                       "cpa_spike_ratio": Decimal("2.0"), "token_days": 7}
+_THRESHOLD_DEFAULTS: dict[str, Any] = asdict(Thresholds())
 
 
 def parse_value(spec: SettingSpec, text: str) -> Any:

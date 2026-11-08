@@ -20,14 +20,10 @@ from target_ai.policy import (
 from target_ai.storage import AuditEntry, Company, Database, MetaObject
 
 from .errors import ApprovalInvalid, ApprovalRequired, ExecutorError, PolicyDenied
+from target_ai.config.runtime import DEFAULT_HALTED, DEFAULT_LEVEL, SETTING_HALTED, SETTING_INSTALL_ID, SETTING_LEVEL, SETTING_OVERSPEND, SETTING_RULES
 
 log = logging.getLogger(__name__)
 
-SETTING_LEVEL = "level"
-SETTING_HALTED = "halted"
-SETTING_RULES = "optimizer_rules"
-SETTING_OVERSPEND = "overspend"
-SETTING_INSTALL_ID = "install_id"
 DEAD_STATUSES = frozenset({"DELETED", "ARCHIVED"})
 RETIRED = "RETIRED"  # снятая предыдущая кампания: на паузе навсегда, не включается
 SAFE_PAUSE_IGNORED_CODES = frozenset({"level_mismatch"})  # пауза снижает риск: уровень ей не помеха
@@ -63,7 +59,7 @@ class Core:
         return await asyncio.to_thread(fn, *args, **kwargs)
 
     def is_halted(self) -> bool:
-        return bool(self._db.settings.get(SETTING_HALTED, False))
+        return bool(self._db.settings.get(SETTING_HALTED, DEFAULT_HALTED))
 
     def install_id(self) -> str:
         """Случайный id установки: создаётся один раз и входит в тег каждого объекта Meta."""
@@ -182,7 +178,7 @@ class Core:
         spent_month = Money(sum(spend(a.meta_id, month_start).amount_minor for a in adsets), info.currency)
         return CompanySnapshot(
             company_id=company.id, currency=info.currency, timezone=info.timezone, now=now,
-            mode=company.mode, level=self._db.settings.get(SETTING_LEVEL, "demo"),  # type: ignore[arg-type]
+            mode=company.mode, level=self._db.settings.get(SETTING_LEVEL, DEFAULT_LEVEL),  # type: ignore[arg-type]
             is_demo=bool(company.profile.get("demo")), halted=self.is_halted(),
             monthly_limit=limit or company.monthly_limit or zero, spent_month=spent_month,
             min_budget_imp=info.min_imp, min_budget_high_freq=info.min_high_freq, min_spend_cap=info.min_spend_cap,

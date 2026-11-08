@@ -10,12 +10,12 @@ from target_ai.executor import ExecutorError, PolicyDenied
 from target_ai.llm import LLMError
 from target_ai.policy import OptimizerDecision
 
-from .common import OpsContext
+from .common import OpsContext, strip_tags
 from .history import record_result
+from target_ai.config.runtime import SETTING_MONTH
 
 log = logging.getLogger(__name__)
 
-SETTING_MONTH = "month:{}"
 CB_APPLY, CB_CANCEL = "ops:apply:", "ops:cancel:"
 APPROVAL_KIND = "optimizer_scale"
 MODEL_ACTIONS = {"pause_ad": "pause_ad", "pause_group": "pause_group"}
@@ -67,8 +67,8 @@ class Optimization:
         try:
             done = await ctx.executor.month_rollover(company_id)
         except (PolicyDenied, ExecutorError) as exc:
-            return [f"Новый месяц: защитные лимиты не обновлены — {exc}"]
-        return [f"Новый месяц {month}: {done.message_ru}", *done.details]
+            return [strip_tags(f"Новый месяц: защитные лимиты не обновлены — {exc}")]
+        return [strip_tags(x) for x in (f"Новый месяц {month}: {done.message_ru}", *done.details)]
 
     async def _decisions(self, company, snapshot) -> list[OptimizerDecision]:
         pace = policy.enforce_pace(snapshot)
@@ -117,7 +117,8 @@ class Optimization:
             elif item.status in ("denied", "failed"):
                 lines.append(f"Не применено: {item.message_ru}")
         approval, buttons = await self._offer(company_id, actionable, pending, lines)
-        return OptimizationResult(company_id, tuple(lines), await self._fresh(company, warnings), approval, None, buttons)
+        return OptimizationResult(company_id, tuple(strip_tags(x) for x in lines), await self._fresh(company, warnings), approval,
+                                  None, buttons)
 
     async def _offer(self, company_id, decisions, pending, lines):
         if not pending:
@@ -137,7 +138,7 @@ class Optimization:
         ctx, shown = self._ctx, []
         for text in warnings:
             if await ctx.io(ctx.db.alerts.mark, f"fatigue:{company.id}:{text[:40]}:{ctx.account_today(company)}", ctx.clock.now()):
-                shown.append(text)
+                shown.append(strip_tags(text))
         return tuple(shown)
 
     async def _announce(self, result: OptimizationResult, notes: list[str]) -> OptimizationResult:

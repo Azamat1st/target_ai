@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from target_ai.money import Money, format_ru
 
 from .cpa import strength_key
 from .optimizer import OptimizerDecision
 from .types import CompanySnapshot, GroupState
+
+
+PACE_NOISE_PCT = 1  # превышение потолка меньше этого процента — шум округления: бюджеты не трогаем
+
+
+def _is_noise(snapshot: CompanySnapshot, cap: int) -> bool:
+    """Шум — малое превышение потолка, при котором даже худший день (бюджеты × (1 + перерасход)) укладывается в остаток."""
+    total = snapshot.active_total
+    small = (total - cap) * 100 < cap * PACE_NOISE_PCT
+    return small and Decimal(total) * (1 + snapshot.overspend) <= Decimal(snapshot.remaining.amount_minor)
 
 
 def _pause(group: GroupState, reason: str) -> OptimizerDecision:
@@ -35,11 +47,17 @@ def _shrink(
     return result
 
 
+def _fits_minimums(active: list[GroupState], cap: int, snapshot: CompanySnapshot) -> bool:
+    return sum(snapshot.min_budget(g.goal_kind).amount_minor for g in active) <= cap
+
+
 def enforce_pace(snapshot: CompanySnapshot) -> list[OptimizerDecision]:
     """Решения, возвращающие сумму дневных бюджетов в потолок; пусто, если всё в пределах."""
     active = [g for g in snapshot.groups if snapshot.is_spending(g)]
     cap = snapshot.daily_cap.amount_minor
     if not active or snapshot.active_total <= cap and snapshot.remaining.amount_minor > 0:
+        return []
+    if snapshot.remaining.amount_minor > 0 and _is_noise(snapshot, cap) and _fits_minimums(active, cap, snapshot):
         return []
     if snapshot.remaining.amount_minor == 0:
         return [_pause(g, "выключена — лимит месяца исчерпан, кампании компании на паузе.") for g in active]

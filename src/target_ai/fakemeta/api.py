@@ -7,6 +7,7 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -394,7 +395,8 @@ class FakeGraphAPI:
     def _view(self, obj: dict) -> dict:
         view = self.state.view(obj)
         if obj["kind"] == "audience":
-            view.update(approximate_count_lower_bound=obj["count_low"], approximate_count_upper_bound=obj["count_high"])
+            view.update(approximate_count_lower_bound=obj["count_low"], approximate_count_upper_bound=obj["count_high"],
+                        time_created=int(datetime.fromisoformat(obj["created_time"]).timestamp()))
         return view
 
     def _update(self, obj: dict, account: dict, body: dict) -> dict[str, Any]:

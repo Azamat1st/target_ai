@@ -26,6 +26,7 @@ from .spec import (
     LaunchSpec, adset_params, campaign_params, creative_params, leadform_params, missing_requirement, money_json,
     parse_spec, step_names, tag_for, targeting_dict, RETENTION_SECONDS_YEAR,
 )
+from target_ai.config.runtime import DEFAULT_LEVEL, SETTING_LEVEL
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +63,20 @@ class Run:
 
     def name(self, base: str, step: str) -> str:
         return f"{base} {self.tag(step)}"
+
+
+def created_after(sent_at: Any, created: Any) -> bool:
+    """Объект создан не раньше записи о попытке (с допуском на часы): ISO-строка или unix-время Meta."""
+    if not sent_at or not created:
+        return False
+    try:
+        sent = datetime.fromisoformat(str(sent_at))
+        born = (datetime.fromtimestamp(created, UTC) if isinstance(created, int | float)
+                else datetime.fromisoformat(str(created)))
+    except ValueError:
+        return False
+    born = born if born.tzinfo else born.replace(tzinfo=UTC)
+    return born >= sent - CLOCK_SKEW
 
 
 class Saga(Core):
@@ -166,7 +181,7 @@ class Saga(Core):
 
     # ------------------------------------------------------------------ подготовка
     def _level(self) -> str:
-        return self._db.settings.get("level", "demo")
+        return self._db.settings.get(SETTING_LEVEL, DEFAULT_LEVEL)
 
     @staticmethod
     def _require_complete(spec: LaunchSpec) -> None:
@@ -349,15 +364,9 @@ class Saga(Core):
 
     @staticmethod
     def _is_ours(row: LaunchStep, found: dict[str, Any]) -> bool:
-        sent_at, created = row.data.get("key_at"), found.get("created_time")
-        if not row.data.get("idempotency_key") or not sent_at or not created:
+        if not row.data.get("idempotency_key"):
             return False
-        try:
-            sent, born = datetime.fromisoformat(str(sent_at)), datetime.fromisoformat(str(created))
-        except ValueError:
-            return False
-        born = born if born.tzinfo else born.replace(tzinfo=UTC)
-        return born >= sent - CLOCK_SKEW
+        return created_after(row.data.get("key_at"), found.get("created_time"))
 
     async def _ensure(self, run: Run, step: str, *, kind: str, parent: str | None, lookup: tuple[str, str] | None,
                       method: str, make_params: Callable[[], dict[str, Any]], action: CreateObject | None,

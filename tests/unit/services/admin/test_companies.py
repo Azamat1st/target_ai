@@ -24,8 +24,8 @@ class StubExecutor:
             self.env.db.approvals.consume(approval_id, self.env.clock.now())
         return self.result(approval_id)
 
-    def create_approval(self, needs, *, company_id, ttl=None):
-        return self.real.create_approval(needs, company_id=company_id)
+    def create_approval(self, needs, *, company_id, ttl=None, intent=None):
+        return self.real.create_approval(needs, company_id=company_id, intent=intent)
 
 
 def needs():

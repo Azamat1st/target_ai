@@ -141,6 +141,15 @@ async def test_scaling_in_autonomous_mode_changes_budget_without_approval(world)
     assert world.db.approvals.list(kind="optimizer_scale") == []
 
 
+async def test_optimization_texts_handed_out_never_carry_the_service_tag(world):
+    company, _ = await strong_group(world, mode="autonomous")
+
+    applied = await world.ops.optimization.run_daily(company.id)
+
+    assert applied.lines
+    assert not [x for x in (*applied.lines, *applied.warnings) if "[ta:" in x]
+
+
 async def test_new_scale_offer_cancels_the_previous_unconfirmed_one(world):
     company, _ = await strong_group(world)
     first = await world.ops.optimization.run_daily(company.id)

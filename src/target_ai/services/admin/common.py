@@ -9,10 +9,10 @@ from typing import Any
 from target_ai.clock import Clock
 from target_ai.notify import Buttons
 from target_ai.storage import AuditEntry, Database
+from target_ai.config.runtime import SETTING_LEVEL
 
 LEVELS = ("demo", "test", "live")
 LEVEL_TITLES = {"demo": "Демо", "test": "Тест", "live": "Боевой"}
-SETTING_LEVEL = "level"
 
 # Статусы ответа сервиса (Reply.status)
 DONE = "done"

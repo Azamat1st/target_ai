@@ -15,6 +15,7 @@ from target_ai.storage import Company
 from . import actions, pending
 from .routes import Routes
 from .menu import UNKNOWN_TEXT
+from target_ai.config.runtime import DEFAULT_HALTED, SETTING_HALTED
 
 log = logging.getLogger(__name__)
 router = Routes("text")
@@ -82,7 +83,7 @@ async def report_intent(app, chat_id: int, companies: list[Company], hint: str |
 async def company_intent(app, chat_id: int, companies: list[Company], intent) -> None:
     kind = intent.kind
     if kind is IntentKind.RESUME and not intent.company and \
-            await asyncio.to_thread(app.db.settings.get, "halted", False):
+            await asyncio.to_thread(app.db.settings.get, SETTING_HALTED, DEFAULT_HALTED):
         await actions.ask_resume_all(app, chat_id)
         return
     prefix = {IntentKind.PAUSE: "cmp:pause", IntentKind.RESUME: "cmp:resume", IntentKind.SET_LIMIT: "cmp:limit"}[kind]

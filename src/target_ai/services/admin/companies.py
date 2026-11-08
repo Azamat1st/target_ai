@@ -15,6 +15,7 @@ from target_ai.storage import Company, Database
 from .common import (
     ACTOR_USER, DONE, ERROR, NEEDS_APPROVAL, SETTING_LEVEL, Journal, Reply, confirm_buttons, intent_of, io, level_title,
 )
+from target_ai.config.runtime import DEFAULT_HALTED, DEFAULT_LEVEL, SETTING_HALTED, SETTING_LEVEL, SETTING_REPORT_TZ
 
 # Колбэки: cmp:list · cmp:card:<id> · cmp:pause:<id> · cmp:resume:<id> · cmp:limit:<id> (бот спрашивает сумму)
 #          cmp:mode:<id>:autonomous|confirm · cmp:ok:<подтверждение> · cmp:no:<подтверждение>
@@ -158,9 +159,7 @@ class Companies:
         if result.status != "needs_approval":
             text = result.message_ru + ("\n" + "\n".join(result.details) if result.details else "")
             return Reply(DONE if result.status in ("done", "partial") else ERROR, text)
-        needs = result.needs_approval  # то же, что `Executor.create_approval`, плюс намерение в payload
-        approval = await io(self._db.approvals.create, kind=needs.kind, now=self._clock.now(), company_id=company_id,
-                            payload={"key": needs.key, "summary": needs.summary_ru, "intent": intent})
+        approval = await io(self._executor.create_approval, result.needs_approval, company_id=company_id, intent=intent)
         text = f"{result.message_ru}\n\nПодтвердите, чтобы продолжить."
         return Reply(NEEDS_APPROVAL, text, confirm_buttons(CALLBACK, approval.id), approval.id)
 
@@ -218,19 +217,19 @@ class Companies:
 
     # ------------------------------------------------------------------ чтение из базы
     def _load_rows(self) -> tuple[str, list[CompanyRow]]:
-        level = str(self._db.settings.get(SETTING_LEVEL, "demo"))
+        level = str(self._db.settings.get(SETTING_LEVEL, DEFAULT_LEVEL))
         return level, [self._row(c) for c in self._db.companies.list()]
 
     def _load_card(self, company_id: int):
         company = self._db.companies.get(company_id)
         if company is None:
             return None
-        return self._row(company), company, str(self._db.settings.get(SETTING_LEVEL, "demo"))
+        return self._row(company), company, str(self._db.settings.get(SETTING_LEVEL, DEFAULT_LEVEL))
 
     def _row(self, company: Company) -> CompanyRow:
         campaigns = self._db.objects.list(company_id=company.id, kind="campaign")
         live = [c for c in campaigns if c.status not in ("DELETED", "ARCHIVED", "RETIRED")]
-        if self._db.settings.get("halted", False):
+        if self._db.settings.get(SETTING_HALTED, DEFAULT_HALTED):
             status = "Стоп-кран"
         elif not live:
             status = "Нет рекламы"
@@ -242,7 +241,7 @@ class Companies:
     def _spent_month(self, company: Company) -> Money | None:
         if not company.currency:
             return None
-        tz = company.timezone or self._db.settings.get("report_tz", self._settings.report_tz)
+        tz = company.timezone or self._db.settings.get(SETTING_REPORT_TZ, self._settings.report_tz)
         today: date = to_account_time(self._clock.now(), tz).date()
         adsets = {o.meta_id for o in self._db.objects.list(company_id=company.id, kind="adset")}
         rows = self._db.stats.list_range(company.id, today.replace(day=1).isoformat(), today.isoformat())

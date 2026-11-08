@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable
 
 from target_ai.agents import Objective
@@ -19,6 +20,23 @@ NEEDS_PAGE = frozenset({Objective.DIRECT_MESSAGES, Objective.LEAD_FORM, Objectiv
 MAX_KEYWORDS = 8
 MAX_PER_KEYWORD = 3
 MAX_ESTIMATES = 12
+MIN_WORD_LEN = 4
+MIN_STEM_LEN = 4
+STEM_CUT = 2
+# Нейтральные широкие интересы: берём их в демо, когда по тексту компании ничего не нашлось.
+DEMO_SEED_KEYWORDS = ("Малый бизнес", "Предпринимательство")
+_WORD_RE = re.compile(r"[^\W\d_]+")
+
+
+def seed_keywords(texts: Iterable[str]) -> list[str]:
+    """Слова из текстов компании и их основы (кофейня -> кофей, кофе): запросы к поиску интересов до Стратега."""
+    words: list[str] = []
+    for text in texts:
+        for word in _WORD_RE.findall(text.lower()):
+            if len(word) >= MIN_WORD_LEN:
+                stem = word[:-STEM_CUT] if len(word) - STEM_CUT >= MIN_STEM_LEN else word
+                words.extend((word, stem, stem[:-1] if len(stem) > MIN_STEM_LEN else stem))
+    return list(dict.fromkeys(words))
 
 
 def targeting_spec(countries: Iterable[str], interest_ids: Iterable[str] = ()) -> dict:

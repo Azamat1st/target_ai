@@ -25,11 +25,12 @@ class Executor(Controls, Engagement):
         """Снимок компании для `decide`/`check_action` у вызывающих сервисов."""
         return await self.snapshot(company_id)
 
-    def create_approval(self, needs: NeedsApproval, *, company_id: int | None, ttl=None):
-        """Создаёт подтверждение под решение политики (ключ уходит в payload)."""
+    def create_approval(self, needs: NeedsApproval, *, company_id: int | None, ttl=None, intent: dict | None = None):
+        """Создаёт подтверждение под решение политики (ключ уходит в payload; `intent` — что сделать после кнопки)."""
         kwargs = {"ttl": ttl} if ttl is not None else {}
+        payload = {"key": needs.key, "summary": needs.summary_ru, **({"intent": intent} if intent is not None else {})}
         return self._db.approvals.create(kind=needs.kind, now=self._clock.now(), company_id=company_id,
-                                         payload={"key": needs.key, "summary": needs.summary_ru}, **kwargs)
+                                         payload=payload, **kwargs)
 
     async def probe_ig_access(self, account_id: str, page_id: str, ig_user_id: str, *,
                               website: str | None = None, gateway=None) -> None:

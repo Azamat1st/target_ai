@@ -1,4 +1,5 @@
 from dataclasses import replace
+from datetime import timedelta
 
 import pytest
 
@@ -114,3 +115,21 @@ async def test_company_without_instagram_is_a_clear_error(env):
 
     with pytest.raises(ExecutorError):
         await env.executor().ensure_engagement_audience(company.id)
+
+
+async def test_audience_with_our_tag_created_before_the_attempt_record_is_not_adopted(env):
+    company = env.company()
+    ex = env.executor()
+    tag = f"[ta:{ex.install_id()}:E{company.id}:engagement]"
+    foreign = env.fake.state.add_object("audience", company.ad_account_id, {"name": f"Вовлечённые {tag}"}, status="ACTIVE",
+                                        count_low=0, count_high=0)
+    started = env.clock.now() + timedelta(hours=1)  # запись попытки сделана позже, чем создан чужой объект
+    env.db.companies.update(replace(env.db.companies.get(company.id), profile={
+        **profile_of(env, company), "engagement_audience_key": "k1", "engagement_audience_key_at": started.isoformat()}))
+
+    with pytest.raises(ExecutorError) as error:
+        await ex.ensure_engagement_audience(company.id)
+
+    assert foreign["id"] in str(error.value) and "не системой" in str(error.value)
+    assert "engagement_audience_id" not in profile_of(env, company)
+    assert [r for r in env.fake.requests if r.method == "POST" and r.path.endswith("/customaudiences")] == []

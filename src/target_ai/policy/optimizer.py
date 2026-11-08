@@ -32,6 +32,10 @@ class OptimizerDecision:
         return None  # предупреждение о выгорании — не действие
 
 
+TRANSFER_TEXT = "бюджет переносится на сильные группы"
+NO_STRONG_TEXT = "сильных групп пока нет — бюджет не перераспределялся"
+
+
 def _comma(value) -> str:
     return f"{value:.1f}".replace(".", ",")
 
@@ -115,7 +119,7 @@ def _budget_move(group: GroupState, new_minor: int, sign: str, why: str, snapsho
         f"{format_ru(Money(new_minor, old.currency))}) — {why}")
 
 
-def _cuts(weak: list[GroupState], target: Money, snapshot: CompanySnapshot) -> list[tuple[OptimizerDecision, int]]:
+def _cuts(weak: list[GroupState], target: Money, snapshot: CompanySnapshot, *, has_strong: bool) -> list[tuple[OptimizerDecision, int]]:
     pct = snapshot.rules.budget_change_max_pct
     cuts = []
     for group in weak:
@@ -123,7 +127,8 @@ def _cuts(weak: list[GroupState], target: Money, snapshot: CompanySnapshot) -> l
         cut = min(_pct_of(group.daily_budget.amount_minor, pct), group.daily_budget.amount_minor - floor)
         if cut > 0 and _can_change_budget(group, snapshot):
             new = group.daily_budget.amount_minor - cut
-            why = f"{_cpa_text(group, target, snapshot)}; бюджет переносится на сильные группы."
+            outcome = TRANSFER_TEXT if has_strong else NO_STRONG_TEXT
+            why = f"{_cpa_text(group, target, snapshot)}; {outcome}."
             cuts.append((_budget_move(group, new, "−", why, snapshot), cut))
     return cuts
 
@@ -159,7 +164,7 @@ def decide(
         key=lambda g: strength_key(g.spend, g.results))
     strong_ids = {g.id for g in strong}
     weak = [g for g in survivors if g.id not in strong_ids]
-    cuts = _cuts(weak, target_cpa, snapshot)
+    cuts = _cuts(weak, target_cpa, snapshot, has_strong=bool(strong))
     freed = sum(g.daily_budget.amount_minor for g in mature if g.id in killed) + sum(c for _, c in cuts)
     movers = [g for g in strong if _can_change_budget(g, snapshot)]
     moved = _raises(movers, freed, "set_budget",

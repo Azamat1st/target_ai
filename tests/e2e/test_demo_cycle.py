@@ -124,9 +124,6 @@ async def test_cycle_survives_scripted_model_that_runs_dry_midway_by_falling_bac
     assert "⏩ Перемотка на 7" in summary
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Дефект офлайн-демо (agents/offline.py media_plan + services Planning): без ключа Claude нет найденных интересов, "
-    "группа «Интересы» отбрасывается, план остаётся из одной группы (спека: 2–4), оптимизатору нечего перераспределять."))
 async def test_offline_demo_plan_has_at_least_two_groups_so_budget_can_be_redistributed(make_e2e):
     e = make_e2e()
 
@@ -136,14 +133,27 @@ async def test_offline_demo_plan_has_at_least_two_groups_so_budget_can_be_redist
     assert len(own_objects(e, "adset")) >= 2
 
 
+async def test_offline_demo_redistributes_budget_after_seven_days_with_one_line_explanations(make_e2e):
+    e = make_e2e()
+
+    summary = await run_cycle(e, TARGET_CPA_EUR)
+
+    assert len(own_objects(e, "adset")) >= 2
+    assert PERFORMANCE_REASON.search(summary)
+    assert_changes_follow_rules(e, TARGET_CPA_EUR * 100)
+    assert_every_decision_is_explained(e, summary)
+
+
 async def test_nothing_is_decided_before_a_group_is_72_hours_old(make_e2e):
-    e = make_e2e({"llm": scripted_happy_path()})
+    e = make_e2e()
     await reach_plan(e, "EUR", TARGET_CPA_EUR)
     await e.tg.press_button(OWNER, "Запустить")
 
-    await e.tg.say(OWNER, "⏩ +2 дня")  # 48 часов: «созреть» группы ещё не могли
+    await e.tg.say(OWNER, "/rewind 3")  # итоги дня в 24, 48 и 72 ч: первые два раньше срока
+    assert "⏩ Перемотка на 3" in e.tg.last(OWNER).text
+    launched = {o.meta_id: o.created_at for o in e.db.objects.list(kind="adset")}
     performance = [x for x in e.db.audit.list() if x.action.startswith("decision:")
                    and (PERFORMANCE_REASON.search(x.data["reason"]) or x.action == "decision:pause")]
 
-    assert performance == []
-    assert all(a["status"] == "ACTIVE" for a in own_objects(e, "adset"))
+    too_early = [x for x in performance if x.created_at - launched[x.data["target"]] < timedelta(hours=MIN_HOURS_BEFORE_DECISION)]
+    assert too_early == []

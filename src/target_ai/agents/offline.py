@@ -39,7 +39,9 @@ from .schemas import (
 HEADLINE_MAX = 40
 CAPS_SHARE_MAX = 0.3
 TEXT_MAX = 2200
-BROAD_SHARE = "0.5"
+SHARES_TWO = ("0.5", "0.5")
+SHARES_WITH_RETARGETING = ("0.4", "0.4", "0.2")
+MIN_GROUPS_WITH_RETARGETING = 3
 CTA_BY_OBJECTIVE = {
     "direct_messages": "INSTAGRAM_MESSAGE",
     "lead_form": "SIGN_UP",
@@ -84,19 +86,21 @@ def media_plan(task: dict[str, Any]) -> MediaPlanProposal:
     interests = [i["name"] for i in task.get("interests_found", [])][:3]
     keywords = tuple(interests or [NOT_FOUND])
     geo = (q.get("geo"),) if q.get("geo") else ()
+    with_retargeting = bool(task.get("retargeting_available")) and task.get("max_groups", 0) >= MIN_GROUPS_WITH_RETARGETING
+    shares = SHARES_WITH_RETARGETING if with_retargeting else SHARES_TWO
+    groups = [
+        GroupProposal(name=_mark("Широкая"), hypothesis=Hypothesis.BROAD, budget_share=shares[0],
+                      locations=geo, rationale=_mark("шаблон")),
+        GroupProposal(name=_mark("Интересы"), hypothesis=Hypothesis.INTERESTS, budget_share=shares[1],
+                      interest_keywords=keywords, locations=geo, rationale=_mark("шаблон")),
+    ]
+    if with_retargeting:
+        groups.append(GroupProposal(name=_mark("Ретаргетинг"), hypothesis=Hypothesis.RETARGETING, budget_share=shares[2],
+                                    locations=geo, rationale=_mark("шаблон")))
     return MediaPlanProposal(
         objective=objective,
         objective_rationale=_mark("цель из анкеты или паспорта"),
-        groups=(
-            GroupProposal(
-                name=_mark("Широкая"), hypothesis=Hypothesis.BROAD, budget_share=BROAD_SHARE,
-                locations=geo, rationale=_mark("шаблон"),
-            ),
-            GroupProposal(
-                name=_mark("Интересы"), hypothesis=Hypothesis.INTERESTS, budget_share=BROAD_SHARE,
-                interest_keywords=keywords, locations=geo, rationale=_mark("шаблон"),
-            ),
-        ),
+        groups=tuple(groups),
         notes=_mark("План по шаблону"),
     )
 

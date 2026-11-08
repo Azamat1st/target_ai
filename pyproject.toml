@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=9", "pytest-asyncio", "pytest-cov"]
+dev = ["pytest>=9", "pytest-asyncio", "pytest-cov", "httpx2"]
 
 [build-system]
 requires = ["hatchling"]

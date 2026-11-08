@@ -13,6 +13,7 @@ from .common import (
     SETTING_LEVEL, io, level_title,
 )
 from .connection import ConnectionCheck
+from target_ai.config.runtime import DEFAULT_LEVEL, SETTING_LEVEL
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ class LevelSwitch:
 
     # ------------------------------------------------------------------ чтение
     async def current(self) -> str:
-        return str(await io(self._db.settings.get, SETTING_LEVEL, "demo"))
+        return str(await io(self._db.settings.get, SETTING_LEVEL, DEFAULT_LEVEL))
 
     async def view(self) -> Reply:
         level = await self.current()
