@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+data/
+*.sqlite3
+*.db
+.DS_Store
+.autopilot/serve.*
