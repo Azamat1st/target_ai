@@ -1,7 +1,7 @@
 window.STATE =
 {
   "slug": "instagram-ads-agent",
-  "dir": "2026-11-08-instagram-ads-agent--wip",
+  "dir": "2026-11-08-instagram-ads-agent",
   "title": "Агентная система таргета Instagram с управлением через Telegram",
   "mode": "full",
   "depth": "normal",
@@ -11,8 +11,8 @@ window.STATE =
   "memoryFile": "CLAUDE.md",
   "skillDir": "/Users/azamat/.codex/skills/autopilot",
   "startedAt": "2026-11-08T18:32:59+05:00",
-  "updatedAt": "2026-11-08T19:10:30+05:00",
-  "finishedAt": null,
+  "updatedAt": "2026-11-08T22:41:05+05:00",
+  "finishedAt": "2026-11-08T22:41:05+05:00",
   "stages": [
     {
       "id": "preflight",
@@ -48,23 +48,30 @@ window.STATE =
     },
     {
       "id": "build",
-      "status": "active",
+      "status": "done",
       "startedAt": "2026-11-08T19:10:08+05:00",
-      "note": "0 из 11 тасков готовы"
+      "note": "11 из 11 тасков готовы",
+      "finishedAt": "2026-11-08T21:36:10+05:00"
     },
     {
       "id": "review",
-      "status": "pending"
+      "status": "done",
+      "startedAt": "2026-11-08T19:16:19+05:00",
+      "note": "проверено 11 из 11",
+      "finishedAt": "2026-11-08T21:36:10+05:00"
     },
     {
       "id": "final",
-      "status": "pending"
+      "status": "done",
+      "startedAt": "2026-11-08T21:36:10+05:00",
+      "note": "слепая приёмка пройдена, отчёт отдан",
+      "finishedAt": "2026-11-08T22:41:05+05:00"
     }
   ],
   "requirements": {
-    "total": 107,
-    "done": 0,
-    "inTicket": 106,
+    "total": 109,
+    "done": 108,
+    "inTicket": 0,
     "inSpec": 0,
     "placeholder": 0,
     "deferred": 1,
@@ -91,11 +98,22 @@ window.STATE =
         "pyproject.toml",
         "start.sh"
       ],
-      "status": "in-progress",
-      "retries": 0,
-      "repairs": 0,
+      "status": "done",
+      "retries": 2,
+      "repairs": 2,
       "handoffs": 0,
-      "startedAt": "2026-11-08T19:10:30+05:00"
+      "startedAt": "2026-11-08T19:10:30+05:00",
+      "repairFindings": [
+        "парсер сумм раздувает «500$ к пятнице» до 500 000 $ — R64",
+        "«500 к пятнице» → 500 000: «к» через пробел — предлог, не множитель — R64",
+        "валюта, названная через слово от числа, терялась — D01: разбор только короткого фрагмента со строгим белым списком"
+      ],
+      "finishedAt": "2026-11-08T19:40:45+05:00",
+      "commit": "f41c612",
+      "tests": {
+        "passed": 194,
+        "failed": 0
+      }
     },
     {
       "id": "02",
@@ -130,10 +148,22 @@ window.STATE =
       "zone": [
         "src/target_ai/policy/"
       ],
-      "status": "pending",
-      "retries": 0,
-      "repairs": 0,
-      "handoffs": 0
+      "status": "done",
+      "retries": 1,
+      "repairs": 2,
+      "handoffs": 0,
+      "startedAt": "2026-11-08T19:27:04+05:00",
+      "repairFindings": [
+        "пакет оптимизатора: рост без кнопки выше потолка; включение группы под видом объявления при остатке 0; имена целей расходятся с агентами; группа с одним объявлением — R48, R51, R23",
+        "кампания на паузе включалась мимо потолка; подтверждение не привязано к суммам; план без вердикта Контролёра вне демо — R51, R06",
+        "состав кампании хранился двумя списками — группа вне списка включалась мимо потолка; новый подход: единый источник campaign_id"
+      ],
+      "finishedAt": "2026-11-08T20:13:18+05:00",
+      "commit": "5409027",
+      "tests": {
+        "passed": 389,
+        "failed": 0
+      }
     },
     {
       "id": "03",
@@ -159,10 +189,20 @@ window.STATE =
         "src/target_ai/meta/",
         "src/target_ai/fakemeta/"
       ],
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 0
+      "repairs": 1,
+      "handoffs": 0,
+      "startedAt": "2026-11-08T19:24:25+05:00",
+      "repairFindings": [
+        "клиент повторял создание после обрыва — путь к дублю группы, R62"
+      ],
+      "finishedAt": "2026-11-08T19:44:01+05:00",
+      "commit": "857e918",
+      "tests": {
+        "passed": 90,
+        "failed": 0
+      }
     },
     {
       "id": "04",
@@ -194,10 +234,21 @@ window.STATE =
         "src/target_ai/llm/",
         "src/target_ai/agents/"
       ],
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 0
+      "repairs": 2,
+      "handoffs": 0,
+      "startedAt": "2026-11-08T19:24:25+05:00",
+      "repairFindings": [
+        "Intent давал модели задать сумму и валюту лимита — D01, R64",
+        "доверенность факта решала строка source от модели — R66, R105i"
+      ],
+      "finishedAt": "2026-11-08T19:46:38+05:00",
+      "commit": "81c135e",
+      "tests": {
+        "passed": 63,
+        "failed": 0
+      }
     },
     {
       "id": "05",
@@ -230,10 +281,21 @@ window.STATE =
       "zone": [
         "src/target_ai/executor/"
       ],
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 0
+      "repairs": 2,
+      "handoffs": 1,
+      "startedAt": "2026-11-08T20:13:18+05:00",
+      "repairFindings": [
+        "стоп-кран во время запуска не останавливал включение; «усыновление» чужой кампании по тегу; два параллельных запуска одной компании; возобновление снятой кампании; снижение лимита не опускало spend_cap — R44, R45, R47, R50, R62",
+        "ошибка Meta после исполнения включения оставляла кампанию активной; стоп-кран во время возобновления — R44, R45"
+      ],
+      "finishedAt": "2026-11-08T20:49:53+05:00",
+      "commit": "7e5ffd9",
+      "tests": {
+        "passed": 46,
+        "failed": 0
+      }
     },
     {
       "id": "06",
@@ -273,10 +335,20 @@ window.STATE =
       "zone": [
         "src/target_ai/services/intake/"
       ],
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 0
+      "repairs": 2,
+      "handoffs": 0,
+      "startedAt": "2026-11-08T20:45:11+05:00",
+      "repairFindings": [
+        "целевая цена нигде не появлялась — оптимизатор в реальном потоке бездействовал — R10, R57, R28–R31"
+      ],
+      "finishedAt": "2026-11-08T21:15:48+05:00",
+      "commit": "6e8d04a",
+      "tests": {
+        "passed": 46,
+        "failed": 0
+      }
     },
     {
       "id": "07",
@@ -312,10 +384,20 @@ window.STATE =
         "src/target_ai/services/ops/",
         "src/target_ai/scheduler/"
       ],
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 0
+      "repairs": 1,
+      "handoffs": 0,
+      "startedAt": "2026-11-08T20:45:11+05:00",
+      "repairFindings": [
+        "4 из 6 мгновенных уведомлений, отчёт по запросу, кнопка/автономность при масштабировании и новом месяце не доказаны тестами — R68, R35, R30, R51"
+      ],
+      "finishedAt": "2026-11-08T20:59:49+05:00",
+      "commit": "f245762",
+      "tests": {
+        "passed": 34,
+        "failed": 0
+      }
     },
     {
       "id": "08",
@@ -345,10 +427,20 @@ window.STATE =
       "zone": [
         "src/target_ai/services/admin/"
       ],
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 0
+      "repairs": 1,
+      "handoffs": 0,
+      "startedAt": "2026-11-08T20:47:18+05:00",
+      "repairFindings": [
+        "доступ рекламного аккаунта к Instagram проверялся чтением профиля — настоящая Meta не отдаёт там 1815199 — R43"
+      ],
+      "finishedAt": "2026-11-08T21:02:38+05:00",
+      "commit": "ef5d629",
+      "tests": {
+        "passed": 54,
+        "failed": 0
+      }
     },
     {
       "id": "09",
@@ -388,10 +480,21 @@ window.STATE =
         "src/target_ai/notify/",
         "src/target_ai/app/"
       ],
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 0
+      "repairs": 2,
+      "handoffs": 0,
+      "startedAt": "2026-11-08T21:08:47+05:00",
+      "repairFindings": [
+        "в демо проба доступа к Instagram шла в симулятор — ложное «доступ есть» — R43",
+        "перенос задач при любой смене уровня слал внеплановые отчёты"
+      ],
+      "finishedAt": "2026-11-08T21:26:45+05:00",
+      "commit": "e28bca4",
+      "tests": {
+        "passed": 22,
+        "failed": 0
+      }
     },
     {
       "id": "10",
@@ -419,10 +522,17 @@ window.STATE =
         "scripts/",
         "docs/demo-transcript.md"
       ],
-      "status": "pending",
+      "status": "done",
       "retries": 0,
       "repairs": 0,
-      "handoffs": 0
+      "handoffs": 0,
+      "startedAt": "2026-11-08T21:23:34+05:00",
+      "finishedAt": "2026-11-08T21:36:10+05:00",
+      "commit": "57fb2e2",
+      "tests": {
+        "passed": 19,
+        "failed": 0
+      }
     },
     {
       "id": "11",
@@ -447,14 +557,102 @@ window.STATE =
         "README.md",
         "docs/"
       ],
-      "status": "pending",
+      "status": "done",
       "retries": 0,
-      "repairs": 0,
-      "handoffs": 0
+      "repairs": 1,
+      "handoffs": 0,
+      "startedAt": "2026-11-08T21:19:54+05:00",
+      "repairFindings": [
+        "по инструкции VPS папка данных недоступна контейнеру — бот не запустится — R102"
+      ],
+      "finishedAt": "2026-11-08T21:26:22+05:00",
+      "commit": "9e7e2df",
+      "tests": {
+        "passed": 7,
+        "failed": 0
+      }
+    },
+    {
+      "id": "12",
+      "title": "Доработка по итогам приёмки",
+      "requirements": [
+        "R89",
+        "R28",
+        "R32",
+        "R04",
+        "R44",
+        "R47"
+      ],
+      "blockedBy": [
+        "10"
+      ],
+      "wave": 7,
+      "zone": [
+        "src/target_ai/config/runtime.py",
+        "agents/offline.py",
+        "services/ops/",
+        "executor/"
+      ],
+      "status": "done",
+      "startedAt": "2026-11-08T21:36:52+05:00",
+      "retries": 0,
+      "repairs": 1,
+      "handoffs": 0,
+      "repairFindings": [
+        "допуск шума 1% в последний день месяца выводил худший день за лимит — R48, R49"
+      ],
+      "finishedAt": "2026-11-08T21:56:34+05:00",
+      "commit": "a67fe73",
+      "tests": {
+        "passed": 1035,
+        "failed": 0
+      }
+    },
+    {
+      "id": "13",
+      "title": "Правки по слепой приёмке",
+      "requirements": [
+        "R12",
+        "R09",
+        "R11",
+        "R24",
+        "R38",
+        "R35",
+        "R33",
+        "R42",
+        "R43",
+        "R69",
+        "R18",
+        "R99"
+      ],
+      "blockedBy": [
+        "12"
+      ],
+      "wave": 8,
+      "zone": [
+        "services/intake/",
+        "services/admin/",
+        "services/ops/",
+        "bot/",
+        "app/",
+        "README.md"
+      ],
+      "status": "done",
+      "startedAt": "2026-11-08T22:06:29+05:00",
+      "retries": 0,
+      "repairs": 1,
+      "handoffs": 2,
+      "repairFindings": [
+        "перепроверка слепой приёмки: новый план при работающей кампании, «изменений не было», откат правок, вердикт при неработающем токене"
+      ],
+      "finishedAt": "2026-11-08T22:41:05+05:00"
     }
   ],
   "singlePass": null,
-  "tests": null,
+  "tests": {
+    "passed": 1080,
+    "failed": 0
+  },
   "debt": {
     "placeholders": [],
     "assumptions": [
@@ -466,7 +664,14 @@ window.STATE =
       "уровень работы глобальный",
       "восстановление запуска по кнопке"
     ],
-    "emptyEnv": []
+    "emptyEnv": [
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_ALLOWED_IDS",
+      "ANTHROPIC_API_KEY",
+      "META_ACCESS_TOKEN",
+      "META_APP_ID",
+      "META_APP_SECRET"
+    ]
   },
   "additions": [
     "A01 → R89: стенограмма демо-прогона",
@@ -479,10 +684,105 @@ window.STATE =
     "beyondBrief": 27,
     "actions": "7 половинчатых дописаны в спеку (лимит Meta при нескольких кампаниях, частота уведомлений, тон, варианты из постов, правила Контролёра, бюджет=лимит, сроки App Review); 27 «сверх брифа» привязаны к требованиям в §15, новых возможностей 2 (A01, A02)"
   },
-  "concerns": [],
+  "concerns": [
+    "T04: messages.create + output_config.format вместо messages.parse (parse скрывает stop_reason при server tools) — живой API не проверен",
+    "T04: httpx2 приходит транзитивно от anthropic 2.6, не объявлен в pyproject",
+    "T01: строгий разбор сумм — «хочу 500» бот переспросит (безопасно, но менее удобно)",
+    "T03: в фейке нет правила 3858082 (креатив без enroll_status)",
+    "T03: создание без ключа идемпотентности не повторяется при обрыве — Исполнитель обязан всегда передавать ключ",
+    "T03: статус кампании, упёршейся в spend_cap, в фейке — WITH_ISSUES (точная строка Meta не подтверждена)",
+    "T02: повтор одинакового Launch на том же снимке проходит по ключу — потребление подтверждения обязано делать хранилище (approvals.consume + UNIQUE(plan_id)) в Исполнителе",
+    "T05: для аудиторий и медиа нет поиска по тегу — после обрыва возможен дубль аудитории (без расхода)",
+    "T05: month_rollover обновляет только защитный лимит, дневные бюджеты пересчитывает темп (таск 07)",
+    "T05: время создания объекта для защиты от «усыновления» читается через внутренний gateway._pages — чисто: добавить created_time в find_by_name_tag (meta/client.py)",
+    "T05: перепроверка при запуске — check_action(Launch) на свежем снимке вместо validate_plan (Plan.data уже не в формате Стратега)",
+    "T05: повышение бюджета/spend_cap, пришедшее во время стоп-крана, не откатывается после вызова, если halt_all не смог поставить кампанию на паузу (пользователю сообщается «НЕ остановлены»)",
+    "T07: DemoTime симулирует день по UTC-дате, сводка — по поясу аккаунта (возможен сдвиг на день)",
+    "T07: предложения модели-Оптимизатора, кроме pause_ad/pause_group, в действия не превращаются",
+    "T08: связка «рекламный аккаунт ↔ Instagram» (ошибка 1815199) проверяется косвенно — точная ошибка может проявиться только при запуске",
+    "СКВОЗНОЕ: ключи настроек (level, halted, optimizer_rules, alert_thresholds, report_time, report_tz) и их значения по умолчанию объявлены заново в 4–5 модулях (executor, ops, admin, scheduler, intake) — нужен один модуль; уборка после волны 4",
+    "T06: Planning.propose длиннее 50 строк",
+    "T06: гео — таблица ~70 городов/стран, остальное бот переспрашивает",
+    "T07: OptimizationResult.lines (для бота) ещё содержат тег [ta:…] — чистится только в emit",
+    "T07: тест текста предложения в confirm собран через or",
+    "T08: admin сам собирает payload подтверждения (копия формата Executor.create_approval)",
+    "T05-3: если в плане уже есть lead_form_id, форма не создаётся и privacy_policy_url не требуется",
+    "T05-3: лид-форма в политике идёт как CreateObject(\"creative\") — отдельного вида нет",
+    "T06: гео — по стране; точный радиус вокруг города пока не поддерживается (в MetaGateway нет поиска гео)",
+    "T05-3: ensure_engagement_audience может усыновить чужую аудиторию с нашим полным тегом (нужен install_id; без расхода) — нет проверки времени создания, как у шагов запуска",
+    "T05-3: два экземпляра Executor параллельно → две аудитории (блокировка в памяти)",
+    "T05: ограждение — эвристика по AST: не видит getattr с переменной/склейкой имени (таких вызовов в коде нет)",
+    "T09: свободный текст разбирается дважды (Intake + бот) — два вызова дешёвой модели на фразу",
+    "T09: очистка processed_updates через приватный db._execute — нужен UpdatesRepo.prune",
+    "T11: Docker не установлен на машине — docker build / compose config не проверялись",
+    "T11: названия кнопок в интерфейсах Meta/BotFather описаны смыслом, не со скриншотов",
+    "T13: таск правок по слепой приёмке потребовал трёх контекстов — нарезка «все находки одним таском» была слишком крупной"
+  ],
   "reviewers": {
-    "manifestSpec": null,
-    "craft": null
+    "manifestSpec": "reviewer (все три оси, по правилу пользователя «один ревьюер»)",
+    "craft": "reviewer",
+    "money": "money-reviewer (вторая ось для денежных тасков — правило пользователя)"
   },
-  "blind": null
+  "blind": {
+    "ranAt": "2026-11-08T22:06:29+05:00",
+    "ranProject": "через App.create + FakeTelegram (настоящих токенов нет)",
+    "drift": [
+      "R12 — Instagram-аккаунт не выбирается кнопкой",
+      "R38/R24 — нет пути к новому медиаплану для существующей компании",
+      "R09 — новая анкета сливается со старой",
+      "R24 — правка словами в демо молча возвращает тот же план",
+      "R18.1 — вопрос о политике захватывает весь текст, нет отмены",
+      "R35 — «отчёт за неделю» даёт суточную сводку; «изменений не было» при изменениях",
+      "R40/R41 — карточка после исчерпания лимита показывает «Работает»",
+      "R42 — журнал с внутренними метками и дублями",
+      "R43 — ❌ и «в тестовый можно» одновременно",
+      "R69 — неверный токен бота → трассировка"
+    ],
+    "verified": "демо-цикл целиком; стоп-кран; чужой ID; чужие кампании; восстановление после сбоя; двойное нажатие; валюты; лимит в Meta",
+    "notVerifiable": "настоящий Telegram, Claude, Meta; Docker",
+    "recheck": "после правок 13/14: все находки закрыты; демо-цикл, стоп-кран, чужой ID, восстановление, двойное нажатие — подтверждены повторно"
+  },
+  "coverage_pct": 93,
+  "concernsTriage": {
+    "fixNow": [
+      15,
+      18,
+      11,
+      24,
+      20,
+      1,
+      "e2e: офлайн-план из одной группы",
+      "e2e: копеечные правки темпа",
+      "e2e: «переносится на сильные» без сильных"
+    ],
+    "dropped": {
+      "9": "закрыто доработкой 05-2 (created_time)",
+      "14": "закрыто probe_ig_access",
+      "28": "закрыто ремонтом 09 (updates.prune)"
+    },
+    "report": [
+      0,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      10,
+      12,
+      13,
+      16,
+      17,
+      19,
+      21,
+      22,
+      23,
+      25,
+      26,
+      27,
+      29,
+      30
+    ]
+  }
 }
