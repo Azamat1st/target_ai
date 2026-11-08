@@ -7,6 +7,7 @@ from typing import Any
 from target_ai.fakemeta import errors
 from target_ai.fakemeta.errors import FakeError
 from target_ai.fakemeta.state import FakeState
+from target_ai.meta.regions import includes_eu
 
 ADVANTAGE_PATH = "targeting.targeting_automation.advantage_audience"
 IMPRESSION_GOALS = frozenset({"REACH", "IMPRESSIONS"})
@@ -59,12 +60,21 @@ def validate_adset(state: FakeState, account: dict[str, Any], body: dict[str, An
     automation = targeting.get("targeting_automation") or {}
     if _is_narrow(targeting) and "advantage_audience" not in automation:
         return errors.invalid_parameter(ADVANTAGE_PATH)
+    countries = (targeting.get("geo_locations") or {}).get("countries") or []
+    if includes_eu(countries) and not (body.get("dsa_beneficiary") and body.get("dsa_payor")):
+        return errors.eu_dsa_required()
     return check_daily_budget(account, body.get("daily_budget"), body.get("optimization_goal"))
 
 
-def validate_creative(body: dict[str, Any]) -> FakeError | None:
+def validate_creative(state: FakeState, body: dict[str, Any]) -> FakeError | None:
     if not (body.get("object_story_spec") or body.get("object_id")):
         return errors.invalid_parameter("object_story_spec")
+    photo = (body.get("object_story_spec") or {}).get("photo_data") or {}
+    if photo.get("image_hash") and photo["image_hash"] not in state.data["images"]:
+        return errors.invalid_parameter("object_story_spec.photo_data.image_hash")
+    media_id = body.get("source_instagram_media_id")
+    if media_id and str(media_id) not in state.data["media"]:
+        return errors.invalid_parameter("source_instagram_media_id")
     return None
 
 
@@ -77,7 +87,14 @@ def validate_ad(state: FakeState, account: dict[str, Any], body: dict[str, Any])
     return None if found is not None else errors.invalid_parameter("creative")
 
 
+def _event_source_ids(body: dict[str, Any]) -> list[str]:
+    inclusions = (body.get("rule") or {}).get("inclusions") or {}
+    return [str(src["id"]) for rule in inclusions.get("rules") or [] for src in rule.get("event_sources") or []]
+
+
 def validate_audience(state: FakeState, body: dict[str, Any]) -> FakeError | None:
+    if body.get("subtype") == "ENGAGEMENT" and not _event_source_ids(body):
+        return errors.invalid_parameter("rule")
     if body.get("subtype") != "LOOKALIKE":
         return None
     if state.obj(str(body.get("origin_audience_id", ""))) is None:
@@ -87,6 +104,20 @@ def validate_audience(state: FakeState, body: dict[str, Any]) -> FakeError | Non
     return None
 
 
+LOOKALIKE_SIZE = 1_000_000
+
+
+def audience_size(state: FakeState, body: dict[str, Any], object_id: str) -> int:
+    """Размер аудитории: вовлечённые - от Instagram-источника (одинаков при каждом создании), прочее - от id."""
+    if body.get("subtype") == "LOOKALIKE":
+        return LOOKALIKE_SIZE
+    sources = _event_source_ids(body)
+    if body.get("subtype") == "ENGAGEMENT" and sources:
+        ig = state.data["ig"].get(sources[0]) or {}
+        return int(ig.get("engaged_size") or 300 + (int(sources[0]) * 7919) % 2000)
+    return 1_000 + int(object_id) % 500
+
+
 def validate_update(state: FakeState, obj: dict[str, Any], account: dict[str, Any], body: dict[str, Any]) -> FakeError | None:
     if body.get("status") == "ACTIVE" and obj["kind"] == "ad" and obj["review"] == "DISAPPROVED":
         return errors.ad_disapproved()
@@ -94,4 +125,13 @@ def validate_update(state: FakeState, obj: dict[str, Any], account: dict[str, An
         return failure
     if "daily_budget" in body:
         return check_daily_budget(account, body["daily_budget"], obj["params"].get("optimization_goal"))
+    return None
+
+
+def validate_leadform(body: dict[str, Any]) -> FakeError | None:
+    policy = body.get("privacy_policy")
+    if not isinstance(policy, dict) or not policy.get("url"):
+        return errors.invalid_parameter("privacy_policy.url")
+    if not body.get("questions"):
+        return errors.invalid_parameter("questions")
     return None

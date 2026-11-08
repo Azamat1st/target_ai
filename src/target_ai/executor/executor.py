@@ -5,10 +5,13 @@ from __future__ import annotations
 from target_ai.policy import NeedsApproval
 
 from .controls import Controls
-from .validation import PLACEHOLDER_HASH
+from .engagement import Engagement
+from target_ai.meta.errors import MetaError
+
+from .probe import standin_for
 
 
-class Executor(Controls):
+class Executor(Controls, Engagement):
     """`Executor(db, gateway_factory, policy, clock, notifier)`.
 
     `gateway_factory(validate_only: bool) -> MetaGateway` возвращает переиспользуемый клиент
@@ -27,15 +30,22 @@ class Executor(Controls):
         return self._db.approvals.create(kind=needs.kind, now=self._clock.now(), company_id=company_id,
                                          payload={"key": needs.key, "summary": needs.summary_ru}, **kwargs)
 
-    async def probe_ig_access(self, account_id: str, page_id: str, ig_user_id: str) -> None:
+    async def probe_ig_access(self, account_id: str, page_id: str, ig_user_id: str, *,
+                              website: str | None = None) -> None:
         """Проверочное создание креатива (`validate_only`): есть ли у аккаунта доступ к Instagram.
 
-        Ничего не создаёт и не пишет в реестр; отказ Meta пробрасывается как `MetaError`
-        (подсубкод 1815199 - `kind="ig_access"`). В журнал уходит одна строка.
+        Креатив ссылается на настоящий пост IG (нет постов - ссылка без картинки). Ничего не создаёт и
+        не пишет в реестр; отказ Meta - `MetaError` (подсубкод 1815199 - `kind="ig_access"`).
+        Одна строка журнала пишется ПОСЛЕ ответа Meta: `ok` или `error` с кодом.
         """
-        params = {"name": "[ПРОВЕРКА] доступ к Instagram",
-                  "object_story_spec": {"page_id": page_id, "instagram_user_id": ig_user_id,
-                                        "photo_data": {"image_hash": PLACEHOLDER_HASH, "caption": "проверка"}}}
-        await self.audit("system", "проверка доступа к Instagram", None, "ok",
-                         account_id=account_id, page_id=page_id, ig_user_id=ig_user_id)
-        await self.gateway(validate_only=True).create_creative(account_id, params)
+        action, info = "проверка доступа к Instagram", {"account_id": account_id, "page_id": page_id,
+                                                         "ig_user_id": ig_user_id}
+        try:
+            params = await standin_for(self.gateway(), name="[ПРОВЕРКА] доступ к Instagram", page_id=page_id,
+                                       ig_user_id=ig_user_id, website=website)
+            await self.gateway(validate_only=True).create_creative(account_id, params)
+        except MetaError as exc:
+            await self.audit("system", action, None, "error", message=exc.user_message_ru, meta_code=exc.code,
+                             meta_subcode=exc.subcode, meta_kind=exc.kind, fbtrace_id=exc.fbtrace_id, **info)
+            raise
+        await self.audit("system", action, None, "ok", **info)

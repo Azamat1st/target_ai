@@ -45,6 +45,7 @@ BUSINESS_DISCOVERY_FIELDS = (
     "media{caption,like_count,comments_count,media_type,permalink,timestamp}"
 )
 PAGE_SIZE = 100
+AUDIENCE_TAG_FIELDS = "id,name"  # у аудиторий нет status/effective_status: лишнее поле Meta отвергает
 MONEY_KEYS = ("daily_budget", "lifetime_budget", "spend_cap", "bid_amount")
 VALIDATE_ONLY = "validate_only"
 SYNC_REVIEW = "synchronous_ad_review"
@@ -169,7 +170,8 @@ class MetaClient:
         return await self._http.request("GET", ad_id, params={"fields": fields})
 
     async def find_by_name_tag(self, parent_id: str, edge: str, tag: str) -> list[dict[str, Any]]:
-        rows = await self._pages(f"{parent_id}/{edge}", {"fields": "id,name,status,effective_status,created_time"})
+        fields = AUDIENCE_TAG_FIELDS if edge == "customaudiences" else "id,name,status,effective_status,created_time"
+        rows = await self._pages(f"{parent_id}/{edge}", {"fields": fields})
         return [row for row in rows if tag in str(row.get("name", ""))]
 
     async def get_ig_profile(self, ig_user_id: str) -> dict[str, Any]:
@@ -212,6 +214,19 @@ class MetaClient:
         params = {"input_token": self._token, "access_token": f"{self._app_id}|{self._app_secret}"}
         payload = await self._http.request("GET", "debug_token", params=params)
         return TokenInfo.from_debug(payload.get("data") or {})
+
+    async def get_page_token(self, page_id: str) -> str:
+        """Токен Страницы (нужен для лид-форм). Значение в журнал не пишется."""
+        payload = await self._http.request("GET", page_id, params={"fields": "access_token"})
+        token = payload.get("access_token")
+        if not token:
+            raise errors.MetaError(errors.PERMISSION, "Meta не выдала токен Страницы: проверьте права доступа к Странице.")
+        return str(token)
+
+    async def list_leadgen_forms(self, page_id: str, page_token: str) -> list[dict[str, Any]]:
+        query = {"fields": "id,name,status,created_time", "limit": PAGE_SIZE}
+        payload = await self._http.request("GET", f"{page_id}/leadgen_forms", params=query, token=page_token)
+        return list(payload.get("data") or [])
 
     async def get_engagement_audience_size(self, audience_id: str) -> int | None:
         fields = "approximate_count_lower_bound,approximate_count_upper_bound"
@@ -290,9 +305,24 @@ class MetaClient:
     async def create_ad(self, account_id: str, params: Mapping[str, Any], *, idempotency_key: str | None = None) -> str | None:
         return await self._create(account_id, "ads", params, idempotency_key, review=True)
 
-    async def create_audience(self, account_id: str, params: Mapping[str, Any]) -> str:
+    async def create_leadgen_form(
+        self, page_id: str, page_token: str, params: Mapping[str, Any], *, idempotency_key: str | None = None,
+    ) -> str | None:
+        """Лид-форма создаётся токеном Страницы; проверочного режима у Meta для неё нет."""
+        self._refuse_in_validate_only("создание лид-формы")
+        payload = await self._http.request(
+            "POST", f"{page_id}/leadgen_forms", body=dict(params), idempotency_key=idempotency_key,
+            creating=True, token=page_token,
+        )
+        return str(payload["id"])
+
+    async def create_audience(
+        self, account_id: str, params: Mapping[str, Any], *, idempotency_key: str | None = None,
+    ) -> str:
         self._refuse_in_validate_only("создание аудитории")
-        payload = await self._http.request("POST", f"{account_id}/customaudiences", body=dict(params), creating=True)
+        payload = await self._http.request(
+            "POST", f"{account_id}/customaudiences", body=dict(params), idempotency_key=idempotency_key, creating=True,
+        )
         return str(payload["id"])
 
     async def upload_image(self, account_id: str, data: bytes, filename: str = "image.jpg") -> str:

@@ -69,10 +69,10 @@ class GraphHttp:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    def _proof(self) -> dict[str, str]:
+    def _proof(self, token: str | None = None) -> dict[str, str]:
         if not self._app_secret:
             return {}
-        digest = hmac.new(self._app_secret.encode(), self._token.encode(), hashlib.sha256).hexdigest()
+        digest = hmac.new(self._app_secret.encode(), (token or self._token).encode(), hashlib.sha256).hexdigest()
         return {"appsecret_proof": digest}
 
     async def request(
@@ -86,13 +86,16 @@ class GraphHttp:
         idempotency_key: str | None = None,
         creating: bool = False,
         limiter_key: str | None = None,
+        token: str | None = None,
     ) -> dict[str, Any]:
         """Один запрос с повторами. creating=True — создающий запрос: после сбоя с неизвестным исходом
         не повторяется (повтор внутри клиента обходит сверку по тегу), а только при лимите запросов."""
         key = limiter_key or account_key(path)
         cost = READ_COST if method == "GET" else WRITE_COST
         headers = {IDEMPOTENCY_HEADER: idempotency_key} if idempotency_key else {}
-        query = {**encode_params(params), **self._proof()}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        query = {**encode_params(params), **self._proof(token)}
         rate_attempt = transient_attempt = 0
         while True:
             await self._limiter.acquire(key, cost)

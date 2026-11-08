@@ -23,15 +23,15 @@ from .results import (
     NEEDS_APPROVAL, ROLLED_BACK, LaunchResult, RecoveryItem,
 )
 from .spec import (
-    LaunchSpec, adset_params, campaign_params, creative_params, money_json, parse_spec, step_names,
-    tag_for, targeting_dict,
+    LaunchSpec, adset_params, campaign_params, creative_params, leadform_params, missing_requirement, money_json,
+    parse_spec, step_names, tag_for, targeting_dict, RETENTION_SECONDS_YEAR,
 )
 
 log = logging.getLogger(__name__)
 
 OPEN_LAUNCH = ("started", "in_progress", "awaiting_decision")
 LAUNCHABLE_PLAN = ("approved", "proposed")
-KILL_ORDER = ("ad", "creative", "adset", "audience", "campaign")
+KILL_ORDER = ("ad", "creative", "leadform", "adset", "audience", "campaign")
 CREATE_RETRIES = 2
 PAUSE_ATTEMPTS = 2
 PAUSABLE = ("campaign", "adset", "ad")
@@ -69,6 +69,7 @@ class Saga(Core):
     async def check_launch(self, plan_id: int) -> LaunchResult:
         """Проверка перед кнопкой: `ready` или `needs_approval` (с ключом); отказ — `PolicyDenied`."""
         plan, spec = await self._plan_and_spec(plan_id)
+        self._require_complete(spec)
         action = await self._launch_action(plan, spec)
         try:
             await self.guard(action, plan.company_id)
@@ -81,6 +82,7 @@ class Saga(Core):
         existing = await self.io(self._db.launches.get_by_plan, plan_id)
         if existing:
             return self._already(existing)
+        self._require_complete(spec)
         if self._level() == "test":
             return await self.validate_plan_in_meta(plan, spec, actor)  # type: ignore[attr-defined]
         if plan.status not in LAUNCHABLE_PLAN:
@@ -166,6 +168,13 @@ class Saga(Core):
     def _level(self) -> str:
         return self._db.settings.get("level", "demo")
 
+    @staticmethod
+    def _require_complete(spec: LaunchSpec) -> None:
+        """Нет данных, без которых Meta откажет (ссылка на политику, DSA-поля) - отказ до создания чего-либо."""
+        missing = missing_requirement(spec)
+        if missing is not None:
+            raise PolicyDenied(missing[1], missing[0])
+
     async def _plan_and_spec(self, plan_id: int) -> tuple[Plan, LaunchSpec]:
         plan = await self.io(self._db.plans.get, plan_id)
         if plan is None:
@@ -226,6 +235,7 @@ class Saga(Core):
             await self._step_audiences(run)
             await self._step_adsets(run)
             await self._step_media(run)
+            await self._step_leadform(run)
             await self._step_creatives(run)
             await self._step_ads(run)
             if run.create:
@@ -326,7 +336,16 @@ class Saga(Core):
                                "Я его не трогаю.")
 
     async def _tagged(self, parent_id: str, edge: str, tag: str) -> list[dict[str, Any]]:
-        return await self.gateway().find_by_name_tag(parent_id, edge, tag)
+        gateway = self.gateway()
+        if edge == "leadgen_forms":  # формы Страницы читаются токеном Страницы
+            rows = await gateway.list_leadgen_forms(parent_id, await gateway.get_page_token(parent_id))
+            return [row for row in rows if tag in str(row.get("name", ""))]
+        return await gateway.find_by_name_tag(parent_id, edge, tag)
+
+    async def _create_form(self, run: Run, params: dict[str, Any], key: str) -> str | None:
+        gateway, page_id = self.gateway(), run.company.page_id or ""
+        return await gateway.create_leadgen_form(page_id, await gateway.get_page_token(page_id), params,
+                                                 idempotency_key=key)
 
     @staticmethod
     def _is_ours(row: LaunchStep, found: dict[str, Any]) -> bool:
@@ -381,7 +400,7 @@ class Saga(Core):
         row = await self.io(self._save_row, row, status="running",
                             data={**row.data, **(extra or {}), "idempotency_key": key, "key_at": key_at})  # ДО вызова
         gateway = getattr(self.gateway(), method)
-        call = (lambda: gateway(run.account, params)) if method == "create_audience" \
+        call = (lambda: self._create_form(run, params, key)) if method == "create_leadgen_form" \
             else (lambda: gateway(run.account, params, idempotency_key=key))
         for attempt in range(CREATE_RETRIES):
             try:
@@ -471,7 +490,7 @@ class Saga(Core):
             return {"name": name, "subtype": "LOOKALIKE", "origin_audience_id": origin,
                     "lookalike_spec": {"type": "similarity"}}
         rule = {"inclusions": {"operator": "or", "rules": [{"event_sources": [{"id": ig_user_id, "type": "ig_business"}],
-                                                            "retention_seconds": 365 * 86400,
+                                                            "retention_seconds": RETENTION_SECONDS_YEAR,
                                                             "filter": {"operator": "and", "filters": [
                                                                 {"field": "event", "operator": "eq",
                                                                  "value": "ig_business_profile_all"}]}}]}}
@@ -520,10 +539,22 @@ class Saga(Core):
         await self.io(self._save_row, row, status="done", meta_id=meta_id)
         return meta_id
 
+    async def _step_leadform(self, run: Run) -> None:
+        if not run.spec.needs_lead_form:
+            return
+        name = run.name(f"{run.spec.name} · форма", "leadform")
+        found = await self._ensure(
+            run, "leadform", kind="leadform", parent=None, lookup=(run.company.page_id or "", "leadgen_forms"),
+            method="create_leadgen_form", action=CreateObject("creative"),  # форма - как креатив: денег не тратит
+            make_params=lambda: leadform_params(run.spec, name))
+        if found:
+            run.ids["leadform"] = found
+
     def creative_params_for(self, run: Run, group_n: int, ad_m: int, name: str) -> dict[str, Any]:
         ad = run.spec.groups[group_n - 1].ads[ad_m - 1]
         image = run.ids.get(f"media:{ad.creative_id}")
-        return creative_params(run.spec, ad, name=name, page_id=run.company.page_id or "",
+        spec = replace(run.spec, lead_form_id=run.ids.get("leadform") or run.spec.lead_form_id)
+        return creative_params(spec, ad, name=name, page_id=run.company.page_id or "",
                                ig_user_id=run.company.ig_user_id or "", image_hash=image)
 
     async def _step_creatives(self, run: Run) -> None:

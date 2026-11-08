@@ -54,7 +54,10 @@ def _ig_row(ig_id: str, username: str, name: str, followers: int, media_count: i
 
 def _add_page_and_ig(state: FakeState, spec: dict[str, Any], account_id: str, rng: random.Random) -> tuple[str, str]:
     ig_id = state.new_id()
-    state.data["ig"][ig_id] = _ig_row(ig_id, spec["ig"], spec["page"], rng.randint(2_000, 30_000), MEDIA_PER_ACCOUNT)
+    state.data["ig"][ig_id] = {
+        **_ig_row(ig_id, spec["ig"], spec["page"], rng.randint(2_000, 30_000), MEDIA_PER_ACCOUNT),
+        "engaged_size": spec["engaged"],  # размер аудитории вовлечённых: у одних IG больше 1000, у других меньше
+    }
     page_id = state.new_id()
     state.data["pages"][page_id] = {
         "id": page_id, "name": spec["page"], "instagram_business_account": {"id": ig_id},

@@ -87,6 +87,11 @@ def audience_terms() -> FakeError:
     return FakeError(code=200, subcode=1870034, message="Terms of service for custom audiences not accepted")
 
 
+def eu_dsa_required() -> FakeError:
+    return FakeError(code=100, subcode=3858152, message="DSA beneficiary and payor are required for EU targeting",
+                     blame_fields=("dsa_beneficiary", "dsa_payor"))
+
+
 def transient() -> FakeError:
     return FakeError(status=500, code=2, message="Service temporarily unavailable", is_transient=True)
 

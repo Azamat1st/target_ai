@@ -6,9 +6,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from target_ai.meta.regions import includes_eu
 from target_ai.money import Money
 
 STANDARD_ENHANCEMENTS = {"creative_features_spec": {"standard_enhancements": {"enroll_status": "OPT_OUT"}}}
+RETENTION_SECONDS_YEAR = 365 * 86400
 POSITIONS_DIRECT = ("stream", "story")
 POSITIONS_WIDE = ("stream", "story", "reels")
 
@@ -74,10 +76,35 @@ class LaunchSpec:
     special_category: str | None = None
     lead_form_id: str | None = None
     website_url: str | None = None
+    privacy_policy_url: str | None = None
+    dsa_beneficiary: str | None = None
+    dsa_payor: str | None = None
 
     @property
     def meta(self) -> Objective:
         return OBJECTIVES[self.objective]
+
+    @property
+    def needs_lead_form(self) -> bool:
+        """Форму создаёт Исполнитель, если цель - лид-форма и готовой формы в плане нет."""
+        return self.objective == "lead_form" and not self.lead_form_id
+
+    @property
+    def targets_eu(self) -> bool:
+        return any(includes_eu(g.countries) for g in self.groups)
+
+
+def missing_requirement(spec: LaunchSpec) -> tuple[str, str] | None:
+    """(код, причина по-русски), если в плане нет данных, без которых Meta запуск не примет; иначе None."""
+    if spec.needs_lead_form and not spec.privacy_policy_url:
+        return ("privacy_policy_missing",
+                "Для лид-формы нужна ссылка на политику конфиденциальности: Meta не создаст форму без неё. "
+                "Добавьте ссылку в план.")
+    if spec.targets_eu and not (spec.dsa_beneficiary and spec.dsa_payor):
+        return ("dsa_missing",
+                "Для показа в странах ЕС Meta требует указать получателя и плательщика рекламы (закон DSA). "
+                "Добавьте оба поля в план.")
+    return None
 
 
 def _money(raw: Mapping[str, Any]) -> Money:
@@ -103,6 +130,8 @@ def parse_spec(data: Mapping[str, Any]) -> LaunchSpec:
         name=str(data.get("name") or "Кампания"), objective=objective, groups=groups,
         special_category=data.get("special_category") or None,
         lead_form_id=data.get("lead_form_id"), website_url=data.get("website_url"),
+        privacy_policy_url=data.get("privacy_policy_url") or None,
+        dsa_beneficiary=data.get("dsa_beneficiary") or None, dsa_payor=data.get("dsa_payor") or None,
     )
 
 
@@ -148,6 +177,8 @@ def step_names(spec: LaunchSpec) -> list[str]:
     names += [f"adset:{n}" for n in range(1, len(spec.groups) + 1)]
     media = sorted({a.creative_id for g in spec.groups for a in g.ads if a.kind == "new_creative"})
     names += [f"media:{m}" for m in media]
+    if spec.needs_lead_form:
+        names.append("leadform")
     for n, g in enumerate(spec.groups, 1):
         names += [f"creative:{n}:{m}" for m in range(1, len(g.ads) + 1)]
     for n, g in enumerate(spec.groups, 1):
@@ -200,10 +231,26 @@ def adset_params(spec: LaunchSpec, group: GroupSpec, *, name: str, campaign_id: 
         params["destination_type"] = meta.destination
     if meta.promoted_page and page_id:
         params["promoted_object"] = {"page_id": page_id}
+    if includes_eu(group.countries):
+        params.update(dsa_beneficiary=spec.dsa_beneficiary, dsa_payor=spec.dsa_payor)
     return params
 
 
-def _cta(spec: LaunchSpec) -> dict[str, Any] | None:
+LEAD_FORM_QUESTIONS = ({"type": "FULL_NAME"}, {"type": "PHONE"})
+PRIVACY_LINK_TEXT = "Политика конфиденциальности"
+
+
+def leadform_params(spec: LaunchSpec, name: str) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "name": name, "questions": [dict(q) for q in LEAD_FORM_QUESTIONS],
+        "privacy_policy": {"url": spec.privacy_policy_url, "link_text": PRIVACY_LINK_TEXT},
+    }
+    if spec.website_url:
+        params["follow_up_action_url"] = spec.website_url
+    return params
+
+
+def cta_for(spec: LaunchSpec) -> dict[str, Any] | None:
     cta = spec.meta.cta
     if cta is None:
         return None
@@ -218,7 +265,7 @@ def _cta(spec: LaunchSpec) -> dict[str, Any] | None:
 def creative_params(spec: LaunchSpec, ad: AdSpec, *, name: str, page_id: str, ig_user_id: str,
                     image_hash: str | None) -> dict[str, Any]:
     params: dict[str, Any] = {"name": name, "degrees_of_freedom_spec": STANDARD_ENHANCEMENTS}
-    cta = _cta(spec)
+    cta = cta_for(spec)
     if ad.kind == "existing_post":
         params.update(object_id=page_id, instagram_user_id=ig_user_id, source_instagram_media_id=ad.creative_id)
         if cta:
@@ -230,4 +277,20 @@ def creative_params(spec: LaunchSpec, ad: AdSpec, *, name: str, page_id: str, ig
     if cta:
         photo["call_to_action"] = cta
     params["object_story_spec"] = {"page_id": page_id, "instagram_user_id": ig_user_id, "photo_data": photo}
+    return params
+
+
+def standin_creative_params(*, name: str, page_id: str, ig_user_id: str, media_id: str | None, link: str,
+                            cta: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Креатив для проверок без загрузки картинки: настоящий пост Instagram, а без постов - ссылка без картинки."""
+    params: dict[str, Any] = {"name": name, "degrees_of_freedom_spec": STANDARD_ENHANCEMENTS}
+    if media_id:
+        params.update(object_id=page_id, instagram_user_id=ig_user_id, source_instagram_media_id=media_id)
+        if cta:
+            params["call_to_action"] = cta
+        return params
+    link_data: dict[str, Any] = {"link": link, "message": "проверка"}
+    if cta:
+        link_data["call_to_action"] = cta
+    params["object_story_spec"] = {"page_id": page_id, "instagram_user_id": ig_user_id, "link_data": link_data}
     return params

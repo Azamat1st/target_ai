@@ -172,3 +172,64 @@ async def test_fake_rate_limit_bucket_answers_with_limit_error_that_client_waits
 
     assert any(wait >= 60 for wait in sleeper.calls)
     assert any(r.status == 400 for r in fake.requests)
+
+
+async def _eu_adset(client, account, countries, **extra):
+    campaign = await _campaign(client, account)
+    targeting = _targeting(geo_locations={"countries": countries})
+    return await client.create_adset(account, {**_adset(campaign, targeting), **extra})
+
+
+async def test_adset_with_eu_country_without_dsa_fields_gives_3858152(client, acct):
+    with pytest.raises(MetaError) as caught:
+        await _eu_adset(client, acct["USD"], ["US", "DE"])
+
+    assert caught.value.kind == "eu_dsa" and caught.value.subcode == 3858152
+
+
+async def test_adset_with_only_one_dsa_field_is_still_rejected(client, acct):
+    with pytest.raises(MetaError) as caught:
+        await _eu_adset(client, acct["USD"], ["FR"], dsa_beneficiary="ООО Ромашка")
+
+    assert caught.value.subcode == 3858152
+
+
+async def test_adset_with_eu_country_and_both_dsa_fields_is_accepted(fake, client, acct):
+    adset = await _eu_adset(client, acct["USD"], ["DE"], dsa_beneficiary="ООО Ромашка", dsa_payor="ООО Ромашка")
+
+    assert fake.object(adset)["params"]["dsa_payor"] == "ООО Ромашка"
+
+
+@pytest.mark.parametrize("countries", [["US"], ["GB", "CH", "NO"]])
+async def test_adset_outside_the_eu_needs_no_dsa_fields(client, acct, countries):
+    assert await _eu_adset(client, acct["USD"], countries)
+
+
+def _photo_creative(image_hash, page):
+    return {"name": "k", "object_story_spec": {"page_id": page["id"], "photo_data": {"image_hash": image_hash}}}
+
+
+async def test_creative_with_unknown_image_hash_is_rejected_with_blame_field(fake, client, acct):
+    page = next(iter(fake.state.data["pages"].values()))
+
+    with pytest.raises(MetaError) as caught:
+        await client.create_creative(acct["USD"], _photo_creative("0" * 32, page))
+
+    assert caught.value.code == 100 and "object_story_spec.photo_data.image_hash" in caught.value.blame_fields
+
+
+async def test_creative_with_an_uploaded_image_hash_is_accepted(fake, client, acct):
+    page = next(iter(fake.state.data["pages"].values()))
+    image_hash = await client.upload_image(acct["USD"], b"jpeg")
+
+    assert await client.create_creative(acct["USD"], _photo_creative(image_hash, page))
+
+
+async def test_creative_from_unknown_instagram_media_is_rejected(fake, client, acct):
+    page = next(iter(fake.state.data["pages"].values()))
+    params = {"name": "k", "object_id": page["id"], "source_instagram_media_id": "999"}
+
+    with pytest.raises(MetaError) as caught:
+        await client.create_creative(acct["USD"], params)
+
+    assert "source_instagram_media_id" in caught.value.blame_fields

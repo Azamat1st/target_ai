@@ -192,3 +192,16 @@ async def test_creative_fix_in_confirm_mode_waits_for_button(env):
     outcome = await ex.apply_creative_fix(old, AdVariant(kind="new_creative", primary_text="т", headline="з"))
 
     assert outcome.status == "needs_approval" and len(env.live("ad")) == 4
+
+
+async def test_test_level_with_new_creative_sends_no_invented_image_hash(env):
+    company = env.company()
+    plan = env.plan(company, new_creative=env.media_asset(company).id)
+    env.db.settings.set("level", "test")
+
+    result = await env.executor().launch(plan.id, None)
+
+    assert result.status == VALIDATED
+    creatives = [r.body for r in env.mutations() if r.path.endswith("/adcreatives")]
+    assert creatives and "image_hash" not in str(creatives)
+    assert env.live("creative") == []

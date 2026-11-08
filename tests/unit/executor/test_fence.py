@@ -3,7 +3,8 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[3] / "src" / "target_ai"
 MUTATORS = {"create_campaign", "create_adset", "create_creative", "create_ad", "create_audience",
-            "upload_image", "upload_video", "set_status", "set_daily_budget", "set_spend_cap"}
+            "upload_image", "upload_video", "set_status", "set_daily_budget", "set_spend_cap",
+            "create_leadgen_form"}
 ALLOWED = {"executor", "meta", "fakemeta"}  # fakemeta реализует API, а не вызывает шлюз
 
 

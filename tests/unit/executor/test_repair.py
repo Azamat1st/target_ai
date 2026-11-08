@@ -527,3 +527,53 @@ async def test_probe_ig_access_raises_ig_access_error_for_subcode_1815199(env):
         await env.executor().probe_ig_access(company.ad_account_id, company.page_id, company.ig_user_id)
 
     assert err.value.kind == "ig_access" and len(env.fake.objects()) == before
+
+
+async def test_probe_ig_access_references_a_real_instagram_post_and_no_image_hash(env):
+    company = env.company()
+
+    await env.executor().probe_ig_access(company.ad_account_id, company.page_id, company.ig_user_id)
+
+    sent = [r for r in env.mutations() if r.path.endswith("/adcreatives")][-1].body
+    assert sent["source_instagram_media_id"] in env.media_ids(company)
+    assert "image_hash" not in str(sent) and env.fake.requests_matching(r"GET \d+/media")
+
+
+async def test_probe_ig_access_without_posts_sends_a_link_creative_without_picture(env):
+    company = env.company()
+    for key in [k for k, m in env.fake.state.data["media"].items() if m["ig_id"] == company.ig_user_id]:
+        del env.fake.state.data["media"][key]
+
+    await env.executor().probe_ig_access(company.ad_account_id, company.page_id, company.ig_user_id,
+                                         website="https://shop.example")
+
+    sent = [r for r in env.mutations() if r.path.endswith("/adcreatives")][-1].body
+    link = sent["object_story_spec"]["link_data"]
+    assert link["link"] == "https://shop.example" and "image_hash" not in str(sent)
+
+
+async def test_probe_ig_access_without_posts_and_site_links_to_the_instagram_profile(env):
+    company = env.company()
+    for key in [k for k, m in env.fake.state.data["media"].items() if m["ig_id"] == company.ig_user_id]:
+        del env.fake.state.data["media"][key]
+    ig = env.fake.state.data["ig"][company.ig_user_id]
+    ig["website"] = None
+
+    await env.executor().probe_ig_access(company.ad_account_id, company.page_id, company.ig_user_id)
+
+    sent = [r for r in env.mutations() if r.path.endswith("/adcreatives")][-1].body
+    assert sent["object_story_spec"]["link_data"]["link"] == f"https://www.instagram.com/{ig['username']}/"
+
+
+async def test_probe_ig_access_logs_its_outcome_after_meta_answers(env):
+    from target_ai.fakemeta.errors import ig_access_denied
+
+    company = env.company()
+    await env.executor().probe_ig_access(company.ad_account_id, company.page_id, company.ig_user_id)
+    env.fake.inject_error(r"POST act_\d+/adcreatives", ig_access_denied())
+    with pytest.raises(MetaError):
+        await env.executor().probe_ig_access(company.ad_account_id, company.page_id, company.ig_user_id)
+
+    rows = [r for r in env.db.audit.list() if r.action == "проверка доступа к Instagram"]
+    assert [r.data["outcome"] for r in rows] == ["ok", "error"]
+    assert rows[1].data["meta_code"] == 100 and rows[1].data["meta_subcode"] == 1815199

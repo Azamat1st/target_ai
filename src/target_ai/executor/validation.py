@@ -13,12 +13,12 @@ from target_ai.policy import CreateObject, Targeting
 from .errors import ApprovalRequired
 from .results import VALIDATED, VALIDATION_FAILED, LaunchResult
 from .saga import Saga
-from .spec import LaunchSpec, adset_params, campaign_params, creative_params, targeting_dict
+from .probe import standin_for
+from .spec import LaunchSpec, cta_for, adset_params, campaign_params, creative_params, targeting_dict
 from target_ai.storage import Plan
 
 log = logging.getLogger(__name__)
 TEST_MARK = "[ТЕСТ]"
-PLACEHOLDER_HASH = "0" * 32
 
 
 class Validation(Saga):
@@ -87,8 +87,13 @@ class Validation(Saga):
         account, creative_id = company.ad_account_id, None
         for n, group in enumerate(spec.groups, 1):
             for m, ad in enumerate(group.ads, 1):
-                params = creative_params(spec, ad, name=f"{TEST_MARK} {n}:{m}", page_id=company.page_id or "",
-                                         ig_user_id=company.ig_user_id or "", image_hash=PLACEHOLDER_HASH)
+                name = f"{TEST_MARK} {n}:{m}"
+                params = creative_params(spec, ad, name=name, page_id=company.page_id or "",
+                                         ig_user_id=company.ig_user_id or "", image_hash=None)
+                if ad.kind == "new_creative":  # картинки в проверку не грузим: вместо неё настоящий пост или ссылка
+                    params = await standin_for(real, name=name, page_id=company.page_id or "",
+                                               ig_user_id=company.ig_user_id or "", website=spec.website_url,
+                                               cta=cta_for(spec))
                 await self._check(f"creative:{n}:{m}", problems, lambda p=params: validator.create_creative(account, p))
                 if creative_id is None:
                     await self.guard(CreateObject("creative"), company.id, actor=actor)

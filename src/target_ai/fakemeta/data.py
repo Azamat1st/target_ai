@@ -42,11 +42,11 @@ INTERESTS: tuple[tuple[str, str, int], ...] = (
 # Демо-аккаунты: (суффикс id, название, валюта, часовой пояс, [imp, high_freq, low_freq], мин. spend_cap) — всё в мин. единицах
 DEMO_ACCOUNTS: tuple[dict[str, Any], ...] = (
     {"num": "100000000000001", "name": "Демо США", "currency": "USD", "tz": "America/New_York",
-     "budgets": (100, 500, 8000), "spend_cap_min": 10000, "page": "Кофейня Север", "ig": "demo_coffee_us"},
+     "budgets": (100, 500, 8000), "spend_cap_min": 10000, "page": "Кофейня Север", "ig": "demo_coffee_us", "engaged": 4200},
     {"num": "100000000000002", "name": "Демо Германия", "currency": "EUR", "tz": "Europe/Berlin",
-     "budgets": (100, 500, 8000), "spend_cap_min": 10000, "page": "Studio Yoga Berlin", "ig": "demo_yoga_de"},
+     "budgets": (100, 500, 8000), "spend_cap_min": 10000, "page": "Studio Yoga Berlin", "ig": "demo_yoga_de", "engaged": 640},
     {"num": "100000000000003", "name": "Демо Япония", "currency": "JPY", "tz": "Asia/Tokyo",
-     "budgets": (150, 750, 12000), "spend_cap_min": 15000, "page": "Tokyo Ramen House", "ig": "demo_ramen_jp"},
+     "budgets": (150, 750, 12000), "spend_cap_min": 15000, "page": "Tokyo Ramen House", "ig": "demo_ramen_jp", "engaged": 1800},
 )
 
 COMPETITORS: tuple[dict[str, Any], ...] = (

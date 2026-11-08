@@ -206,7 +206,7 @@ class FakeGraphAPI:
             case [account, *rest] if account.startswith("act_"):
                 return self._account(method, account, rest, params, body, headers, path)
             case [object_id, *rest]:
-                return self._object(method, object_id, rest, params, body, path)
+                return self._object(method, object_id, rest, params, body, path, headers)
         raise _Fail(errors.invalid_parameter())
 
     def _list(self, rows: list[dict], params: dict, path: str) -> dict[str, Any]:
@@ -235,10 +235,12 @@ class FakeGraphAPI:
                 kind = CREATE_EDGES[edge]
                 rows = [self.state.view(o) for o in self.state.objects(kind, account_id)]
                 return self._list(rows, params, path)
+            case "GET", ["customaudiences"]:
+                return self._list([self._view(o) for o in self.state.objects("audience", account_id)], params, path)
             case "POST", [("campaigns" | "adsets" | "adcreatives" | "ads") as edge]:
                 return self._create(account, CREATE_EDGES[edge], body, headers)
             case "POST", ["customaudiences"]:
-                return self._create_audience(account, body)
+                return self._create_audience(account, body, headers)
             case "POST", ["adimages"]:
                 return self._upload_image(body)
             case "POST", ["advideos"]:
@@ -258,20 +260,16 @@ class FakeGraphAPI:
         options = body.get("execution_options") or []
         validate_only = "validate_only" in options
         key = None if validate_only or self.ignore_idempotency_keys else headers.get(IDEMPOTENCY_HEADER)
-        fingerprint = hashlib.sha256(json.dumps([kind, body], sort_keys=True, default=str).encode()).hexdigest()
-        if key and key in self.state.data["idem"]:
-            known = self.state.data["idem"][key]
-            if known["fp"] != fingerprint:
-                raise _Fail(FakeError(code=100, subcode=1349016, message="Idempotency key reused with different parameters"))
-            return {"id": known["id"]}
+        fingerprint = _fingerprint(kind, body)
+        if known := self._replay(key, fingerprint):
+            return known
         failure = self._validate_create(account, kind, body)
         if failure:
             raise _Fail(failure)
         if validate_only:
             return {"success": True}
         obj = self._store_object(account, kind, body)
-        if key:
-            self.state.data["idem"][key] = {"fp": fingerprint, "id": obj["id"]}
+        self._remember(key, fingerprint, obj["id"])
         return {"id": obj["id"]}
 
     def _validate_create(self, account: dict, kind: str, body: dict) -> FakeError | None:
@@ -281,7 +279,7 @@ class FakeGraphAPI:
             case "adset":
                 return rules.validate_adset(self.state, account, body)
             case "creative":
-                return rules.validate_creative(body)
+                return rules.validate_creative(self.state, body)
             case _:
                 return rules.validate_ad(self.state, account, body)
 
@@ -298,13 +296,18 @@ class FakeGraphAPI:
                 extra[key] = int(body[key])
         return self.state.add_object(kind, account["id"], dict(body), **extra)
 
-    def _create_audience(self, account: dict, body: dict) -> dict[str, Any]:
+    def _create_audience(self, account: dict, body: dict, headers: dict) -> dict[str, Any]:
+        key = None if self.ignore_idempotency_keys else headers.get(IDEMPOTENCY_HEADER)
+        fingerprint = _fingerprint("audience", body)
+        if known := self._replay(key, fingerprint):
+            return known
         failure = rules.validate_audience(self.state, body)
         if failure:
             raise _Fail(failure)
         obj = self.state.add_object("audience", account["id"], dict(body), status="ACTIVE")
-        low = 1_000_000 if body.get("subtype") == "LOOKALIKE" else 1_000 + int(obj["id"]) % 500
+        low = rules.audience_size(self.state, body, obj["id"])
         obj.update(count_low=low, count_high=int(low * 1.25))
+        self._remember(key, fingerprint, obj["id"])
         return {"id": obj["id"]}
 
     def _upload_image(self, body: dict) -> dict[str, Any]:
@@ -313,19 +316,62 @@ class FakeGraphAPI:
         return {"images": {str(body.get("name", "image.jpg")): {"hash": digest, "url": f"https://cdn.example/{digest}.jpg"}}}
 
     # ------------------------------------------------------------ объекты по id
-    def _object(self, method: str, object_id: str, rest: list[str], params: dict, body: dict, path: str) -> dict[str, Any]:
+    def _object(self, method: str, object_id: str, rest: list[str], params: dict, body: dict, path: str,
+                headers: dict) -> dict[str, Any]:
         data = self.state.data
         if object_id in data["ig"]:
             return self._ig(method, data["ig"][object_id], rest, params, path)
         if object_id in data["media"]:
             return self._media_insights(data["media"][object_id], rest, params)
         if object_id in data["pages"]:
-            page = data["pages"][object_id]
-            return project({**page, "id": page["id"]}, params.get("fields") or "id,name")
+            return self._page(method, data["pages"][object_id], rest, params, body, path, headers)
         obj = self.state.obj(object_id)
         if obj is None:
             raise _Fail(FakeError(code=100, subcode=33, message="Unsupported get request: object does not exist"))
         return self._ad_object(method, obj, rest, params, body, path)
+
+    def _page(self, method: str, page: dict, rest: list[str], params: dict, body: dict, path: str,
+              headers: dict) -> dict[str, Any]:
+        match method, rest:
+            case "GET", []:
+                return project({**page, "id": page["id"]}, params.get("fields") or "id,name")
+            case "GET", ["leadgen_forms"]:
+                self._require_page_token(page, headers)
+                forms = [self.state.view(o) for o in self.state.objects("leadform", parent_id=page["id"])]
+                return self._list(forms, params, path)
+            case "POST", ["leadgen_forms"]:
+                self._require_page_token(page, headers)
+                return self._create_leadform(page, body, headers)
+        raise _Fail(errors.invalid_parameter())
+
+    @staticmethod
+    def _require_page_token(page: dict, headers: dict) -> None:
+        if headers.get("authorization") != f"Bearer {page['access_token']}":
+            raise _Fail(errors.permission_denied())
+
+    def _create_leadform(self, page: dict, body: dict, headers: dict) -> dict[str, Any]:
+        key = None if self.ignore_idempotency_keys else headers.get(IDEMPOTENCY_HEADER)
+        fingerprint = _fingerprint("leadform", body)
+        if known := self._replay(key, fingerprint):
+            return known
+        if failure := rules.validate_leadform(body):
+            raise _Fail(failure)
+        obj = self.state.add_object("leadform", page["account_id"], dict(body), parent_id=page["id"], status="ACTIVE")
+        self._remember(key, fingerprint, obj["id"])
+        return {"id": obj["id"]}
+
+    def _replay(self, key: str | None, fingerprint: str) -> dict[str, Any] | None:
+        """Повтор запроса с тем же ключом отдаёт тот же id; тот же ключ с другими параметрами - ошибка."""
+        if not key or key not in self.state.data["idem"]:
+            return None
+        known = self.state.data["idem"][key]
+        if known["fp"] != fingerprint:
+            raise _Fail(FakeError(code=100, subcode=1349016, message="Idempotency key reused with different parameters"))
+        return {"id": known["id"]}
+
+    def _remember(self, key: str | None, fingerprint: str, object_id: str) -> None:
+        if key:
+            self.state.data["idem"][key] = {"fp": fingerprint, "id": object_id}
 
     def _ad_object(self, method: str, obj: dict, rest: list[str], params: dict, body: dict, path: str) -> dict[str, Any]:
         account = self.state.data["accounts"][obj["account_id"]]
@@ -397,6 +443,10 @@ class FakeGraphAPI:
         if unknown:
             raise _Fail(errors.invalid_parameter("metric"))
         return {"data": [{"name": n, "period": "lifetime", "values": [{"value": media["insights"][n]}], "title": n} for n in names]}
+
+
+def _fingerprint(kind: str, body: dict[str, Any]) -> str:
+    return hashlib.sha256(json.dumps([kind, body], sort_keys=True, default=str).encode()).hexdigest()
 
 
 def _body(request: httpx.Request) -> dict[str, Any]:

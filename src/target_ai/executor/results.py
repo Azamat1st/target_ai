@@ -84,3 +84,12 @@ class ChangeResult:
 
 READY = "ready"
 VALIDATION_FAILED = "validation_failed"
+
+
+@dataclass(frozen=True)
+class EngagementAudience:
+    """Аудитория вовлечённых компании. `size` - нижняя оценка Meta (None - неизвестна); `note` - пометка."""
+
+    audience_id: str
+    size: int | None
+    note: str = ""
