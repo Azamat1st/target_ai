@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import SecretStr
 
+from support.clock import FixedClock
 from support.fake_telegram import FakeTelegram
 from target_ai.app import App
 from target_ai.config import Settings
@@ -29,7 +30,7 @@ class E2E:
         self.tg = FakeTelegram()
         self.app = App.create(self.settings, overrides={
             "bot_session": self.tg.session, "llm": OfflineLLM(), "meta_sleeper": no_sleep, "tick_seconds": 3600,
-            **(overrides or {})})
+            "base_clock": FixedClock(), **(overrides or {})})
         self.tg.bind(self.app)
 
     @property

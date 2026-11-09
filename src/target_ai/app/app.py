@@ -34,8 +34,8 @@ from target_ai.config.runtime import DEFAULT_LEVEL, SETTING_LEVEL
 
 log = logging.getLogger(__name__)
 
-OVERRIDE_KEYS = frozenset({"llm", "meta_transport", "fake_meta", "clock", "bot_session", "notifier",
-                           "claude_probe", "meta_sleeper", "media_dir", "tick_seconds"})
+OVERRIDE_KEYS = frozenset({"llm", "meta_transport", "fake_meta", "clock", "base_clock", "bot_session",
+                           "notifier", "claude_probe", "meta_sleeper", "media_dir", "tick_seconds"})
 POLLING_TIMEOUT_SECONDS = 10
 
 
@@ -70,8 +70,11 @@ class App:
 
     @classmethod
     def create(cls, settings: Settings, overrides: Mapping[str, Any] | None = None) -> App:
-        """`overrides`: llm, meta_transport, fake_meta, clock, bot_session, notifier, claude_probe,
-        meta_sleeper, media_dir, tick_seconds — подмены для тестов (шов №1)."""
+        """`overrides`: llm, meta_transport, fake_meta, clock, base_clock, bot_session, notifier, claude_probe,
+        meta_sleeper, media_dir, tick_seconds — подмены для тестов (шов №1).
+
+        `base_clock` — источник «настоящего» времени вместо `RealClock` (поверх него идёт перемотка демо);
+        `clock` подменяет часы приложения целиком."""
         ov = dict(overrides or {})
         unknown = set(ov) - OVERRIDE_KEYS
         if unknown:
@@ -90,7 +93,8 @@ class App:
         self.settings = settings
         settings.database_path.parent.mkdir(parents=True, exist_ok=True)
         self.db = Database(settings.database_path)
-        self.clock = ov.get("clock") or LevelClock(SimClock(self.db.sim), RealClock(), self.db)
+        base = ov.get("base_clock") or RealClock()
+        self.clock = ov.get("clock") or LevelClock(SimClock(self.db.sim, base), base, self.db)
         fake = ov.get("fake_meta") or FakeGraphAPI(self.db.fake_meta, self.clock)
         self.fake_meta = fake
         self.gateways = LevelGateways(self.db, settings, self.clock, fake, transport=ov.get("meta_transport"),

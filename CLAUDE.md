@@ -8,7 +8,7 @@ Telegram-бот, через который один владелец ведёт 
 | Команда | Что делает |
 |---------|------------|
 | `uv sync` | Установить зависимости (Python 3.12 uv скачает сам; системный python3 — 3.9, не подходит) |
-| `uv run pytest -q` | Все тесты (последний полный прогон: 1031 passed); сеть и `.env` не нужны |
+| `uv run pytest -q` | Все тесты (последний полный прогон: 1080 passed); сеть и `.env` не нужны |
 | `uv run pytest tests/unit/money/test_parse.py -q` | Один файл; `-k <имя>` — один тест |
 | `uv run pytest tests/e2e -q` | Сквозные сценарии (приложение целиком) |
 | `uv run pytest --cov=target_ai -q` | Покрытие (цель нового кода — 80%) |
@@ -45,7 +45,7 @@ docs/           adr/0001..0012 (решения), demo-transcript.md (генер�
 
 ## Ключевые файлы
 
-- `src/target_ai/app/app.py` — `App.create/run/startup/shutdown`, вся сборка; `overrides`: `llm, meta_transport, fake_meta, clock, bot_session, notifier, claude_probe, meta_sleeper, media_dir, tick_seconds` (другой ключ — `ValueError`).
+- `src/target_ai/app/app.py` — `App.create/run/startup/shutdown`, вся сборка; `overrides`: `llm, meta_transport, fake_meta, clock, base_clock, bot_session, notifier, claude_probe, meta_sleeper, media_dir, tick_seconds` (другой ключ — `ValueError`).
 - `src/target_ai/__main__.py` — точка входа, `check_settings` (подсказки про `.env`), код выхода 2 при плохих настройках.
 - `src/target_ai/bot/routes.py`, `callbacks.py`, `commands.py` — порядок: доступ -> дедупликация `update_id` -> команды/меню -> колбэки -> медиа -> текст.
 - `src/target_ai/executor/executor.py`, `saga.py`, `core.py`, `controls.py` — запуск, откат, стоп-кран, `enable_object`.
@@ -123,6 +123,7 @@ docs/           adr/0001..0012 (решения), demo-transcript.md (генер�
 - Тесты с `validate_only=True`: клиент отказывает в `set_*`, `delete`, `upload_*`, `create_audience` (`validate_only_unsupported`) — поэтому тестовый уровень держит второй клиент.
 - `Claude`: `messages.create` + `output_config.format` и ручной `model_validate_json` вместо `messages.parse` (тот прячет `stop_reason` при обрезке); без `temperature`/`top_p`, prefill и forced `tool_choice`.
 - Лимит Meta: корзина 60 баллов/300 с на `act_*`; запись в объект по id тоже списывается на аккаунт.
+- Приложение в тестах — только с `overrides["base_clock"] = FixedClock()` (`tests/support/clock.py`, 2026-11-08 18:00 UTC): иначе демо-время идёт от настоящего «сейчас», дневной бюджет зависит от дня запуска, и ожидаемые суммы краснеют на следующий день.
 
 ## Как здесь работает Autopilot
 

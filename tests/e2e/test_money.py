@@ -169,10 +169,12 @@ async def test_crash_mid_launch_then_restart_asks_continue_or_rollback_and_spend
 
     again = E2E.__new__(E2E)  # новый процесс: те же настройки и та же база, новый Telegram
     again.settings = e.settings
+    from support.clock import FixedClock
     from support.fake_telegram import FakeTelegram
     again.tg = FakeTelegram()
     again.app = App.create(e.settings, overrides={
-        "bot_session": again.tg.session, "meta_sleeper": no_sleep, "tick_seconds": 3600})
+        "bot_session": again.tg.session, "meta_sleeper": no_sleep, "tick_seconds": 3600,
+        "base_clock": FixedClock()})
     again.tg.bind(again.app)
     await again.app.startup()
     await again.app._ticker.stop()
